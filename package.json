@@ -1,0 +1,14 @@
+{
+  "name": "wa-assistant-suite",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "apps/*"
+  ],
+  "scripts": {
+    "dev:engine": "npm --workspace=apps/core-engine run dev",
+    "dev:web": "npm --workspace=apps/web-control-center run dev",
+    "db:push": "npm --workspace=apps/core-engine run db:push",
+    "setup:auth": "node apps/core-engine/src/scripts/setup_auth.js"
+  }
+}

@@ -1,0 +1,24 @@
+datasource db {
+  provider = "sqlite"
+  url      = "file:./data.db"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Config {
+  id            Int     @id @default(1)
+  status        String  @default("ON")
+  customContext String  @default("")
+}
+
+model ConversationLog {
+  id         String   @id @default(uuid())
+  chatId     String
+  senderName String
+  message    String
+  response   String
+  toolsUsed  String?
+  createdAt  DateTime @default(now())
+}

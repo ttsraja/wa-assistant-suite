@@ -1,0 +1,5 @@
+node_modules
+npm-cache
+apps/core-engine/.wwebjs_auth
+apps/core-engine/.wwebjs_cache
+
