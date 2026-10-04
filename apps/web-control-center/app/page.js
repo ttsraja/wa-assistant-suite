@@ -21,20 +21,28 @@ export default function Dashboard() {
 
     // Initial fetch and socket subscription
     useEffect(() => {
-        // Fetch current state
+        let isMounted = true;
+
+        // 1. Fetch current state
         fetch("http://localhost:3001/api/state")
             .then((res) => res.json())
             .then((data) => {
+                if (!isMounted) return;
                 setState(data);
                 setContextInput(data.customContext || "");
                 setEngineOnline(true);
             })
-            .catch(() => setEngineOnline(false));
+            .catch((e) => {
+                console.error("Error fetching state:", e);
+                if (!isMounted) return;
+                setEngineOnline(false);
+            });
 
-        // Fetch past conversation logs
+        // 2. Fetch past conversation logs
         fetch("http://localhost:3001/api/logs")
             .then((res) => res.json())
             .then((pastLogs) => {
+                if (!isMounted) return;
                 const formatted = (pastLogs || []).flatMap((l) => [
                     {
                         id: l.id + "-res",
@@ -54,17 +62,23 @@ export default function Dashboard() {
                 ]);
                 setLogs(formatted);
             })
-            .catch(() => {});
+            .catch((e) => {
+                console.error("Error fetching logs:", e);
+            });
 
-        // Setup Socket.io
+        // 3. Setup Socket.io
         const socket = io("http://localhost:3001", {
             reconnectionAttempts: 10,
             timeout: 5000,
         });
         socketRef.current = socket;
 
-        socket.on("connect", () => setEngineOnline(true));
-        socket.on("disconnect", () => setEngineOnline(false));
+        socket.on("connect", () => {
+            setEngineOnline(true);
+        });
+        socket.on("disconnect", () => {
+            setEngineOnline(false);
+        });
 
         socket.on("state", (newState) => {
             setState(newState);
@@ -74,6 +88,9 @@ export default function Dashboard() {
         });
 
         socket.on("live_log", (log) => {
+            // Only process and display logs if the component is mounted
+            if (!isMounted) return;
+
             setLogs((prev) => [
                 {
                     id: log.id || Date.now() + Math.random(),
@@ -88,8 +105,11 @@ export default function Dashboard() {
             ].slice(0, 30));
         });
 
+        // Cleanup function
         return () => {
-            socket.disconnect();
+            isMounted = false; // Mark component as unmounted
+            socket.off("live_log"); // Clean up the specific listener
+            socket.disconnect(); // Disconnect the socket
         };
     }, []);
 
@@ -144,9 +164,10 @@ export default function Dashboard() {
                         <span className={`status-indicator-dot ${engineOnline ? "ready" : "disconnected"}`} style={{ width: 8, height: 8 }} />
                         {engineOnline ? "Engine Online :3001" : "Engine Disconnected"}
                     </span>
-                    <span className="badge badge-indigo">
-                        Ollama: gemma4
-                    </span>
+                    <a href="/settings"
+                        style={{ padding: "5px 14px", borderRadius: 8, background: "rgba(99,102,241,0.12)", border: "1px solid rgba(99,102,241,0.3)", color: "#a5b4fc", fontSize: 12, textDecoration: "none", fontWeight: 600 }}>
+                        ⚙️ Settings
+                    </a>
                 </div>
             </header>
 

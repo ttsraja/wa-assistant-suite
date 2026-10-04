@@ -22,3 +22,47 @@ model ConversationLog {
   toolsUsed  String?
   createdAt  DateTime @default(now())
 }
+
+// Feature #1 – LLM Provider Configuration
+model LLMConfig {
+  id        Int      @id @default(1)
+  provider  String   @default("ollama")   // ollama | gemini | claude | openai | grok
+  modelName String   @default("gemma4:latest")
+  apiKey    String?
+  baseUrl   String?  // for Grok / custom OpenAI-compat endpoints
+  updatedAt DateTime @updatedAt
+}
+
+// Feature #2 – Calendar / Tasks Provider Configuration
+model CalendarConfig {
+  id              Int      @id @default(1)
+  calendarProvider String  @default("google") // google | macos | windows
+  tasksProvider    String  @default("google") // google | macos | windows
+  updatedAt        DateTime @updatedAt
+}
+
+// Feature #3 – Per-contact policy, tone & restrictions
+model ContactPolicy {
+  id                  Int      @id @default(autoincrement())
+  contactId           String   @unique  // WhatsApp ID, e.g. 919962951116@c.us
+  displayName         String
+  tone                String   @default("auto")    // auto | formal | casual | tamil | tanglish
+  infoLevel           String   @default("full")    // full | limited | minimal
+  restrictedTopics    String?  // JSON array of strings
+  requiresApproval    Boolean  @default(false)
+  customInstructions  String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+// Feature #3 – Approval queue for sensitive/restricted messages
+model PendingApproval {
+  id          Int      @id @default(autoincrement())
+  contactId   String
+  senderName  String
+  message     String
+  aiDraft     String?  // AI-generated draft for the owner to edit before sending
+  status      String   @default("pending")  // pending | approved | rejected | sent
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+}

@@ -6,7 +6,10 @@ import pkg from 'whatsapp-web.js';
 const { Client, LocalAuth } = pkg;
 import qrcode from 'qrcode';
 import { PrismaClient } from '@prisma/client';
-import { handleIncomingMessage } from './services/ollamaAgent.js';
+import { handleIncomingMessage, dispatchApprovedReply } from './services/ollamaAgent.js';
+import { getLLMConfig, invalidateLLMCache } from './services/llmProvider.js';
+import { getCalendarConfig, invalidateCalendarCache } from './services/calendarProvider.js';
+import { getAllContactPolicies, upsertContactPolicy, deleteContactPolicy, getPendingApprovals, approveApproval, rejectApproval, invalidatePolicyCache } from './services/contactPolicy.js';
 import fs from 'fs';
 
 const prisma = new PrismaClient();
@@ -196,28 +199,119 @@ app.get('/api/logs', async (req, res) => {
     const logs = await prisma.conversationLog.findMany({ take: 50, orderBy: { createdAt: 'desc' } });
     res.json(logs);
 });
+
+// ── Feature #1: LLM Configuration ─────────────────────────────────────────────
+app.get('/api/llm-config', async (req, res) => {
+    try {
+        const config = await getLLMConfig();
+        // Never expose the raw API key to the frontend
+        res.json({ ...config, apiKey: config.apiKey ? '••••••••' : '' });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/llm-config', async (req, res) => {
+    try {
+        const { provider, modelName, apiKey, baseUrl } = req.body;
+        const updateData = {};
+        if (provider) updateData.provider = provider;
+        if (modelName) updateData.modelName = modelName;
+        if (baseUrl !== undefined) updateData.baseUrl = baseUrl || null;
+        // Only update apiKey if a real value was sent (not the masked '••••••••')
+        if (apiKey && apiKey !== '••••••••') updateData.apiKey = apiKey;
+
+        const existing = await prisma.lLMConfig.findUnique({ where: { id: 1 } });
+        const updated = existing
+            ? await prisma.lLMConfig.update({ where: { id: 1 }, data: updateData })
+            : await prisma.lLMConfig.create({ data: { id: 1, provider: 'ollama', modelName: 'gemma4:latest', ...updateData } });
+        invalidateLLMCache();
+        res.json({ ...updated, apiKey: updated.apiKey ? '••••••••' : '' });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Feature #2: Calendar / Tasks Configuration ────────────────────────────────
+app.get('/api/calendar-config', async (req, res) => {
+    try {
+        const config = await getCalendarConfig();
+        res.json(config);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/calendar-config', async (req, res) => {
+    try {
+        const { calendarProvider, tasksProvider } = req.body;
+        const updateData = {};
+        if (calendarProvider) updateData.calendarProvider = calendarProvider;
+        if (tasksProvider) updateData.tasksProvider = tasksProvider;
+
+        const existing = await prisma.calendarConfig.findUnique({ where: { id: 1 } });
+        const updated = existing
+            ? await prisma.calendarConfig.update({ where: { id: 1 }, data: updateData })
+            : await prisma.calendarConfig.create({ data: { id: 1, calendarProvider: 'google', tasksProvider: 'google', ...updateData } });
+        invalidateCalendarCache();
+        res.json(updated);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Feature #3: Contact Policies ──────────────────────────────────────────────
+app.get('/api/contact-policies', async (req, res) => {
+    try { res.json(await getAllContactPolicies()); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/contact-policies', async (req, res) => {
+    try {
+        const policy = await upsertContactPolicy(req.body);
+        invalidatePolicyCache(req.body.contactId);
+        res.json(policy);
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/contact-policies/:contactId', async (req, res) => {
+    try {
+        await deleteContactPolicy(decodeURIComponent(req.params.contactId));
+        res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ── Feature #3: Approval Queue ────────────────────────────────────────────────
+app.get('/api/approvals', async (req, res) => {
+    try { res.json(await getPendingApprovals(req.query.status || 'pending')); }
+    catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/approvals/:id/approve', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const { editedResponse } = req.body;
+        const approval = await approveApproval(id, editedResponse);
+        // Dispatch the reply via WhatsApp immediately
+        await dispatchApprovedReply(id, approval.aiDraft, client, io);
+        res.json({ ok: true, approval });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/approvals/:id/reject', async (req, res) => {
+    try {
+        const id = parseInt(req.params.id, 10);
+        const approval = await rejectApproval(id);
+        res.json({ ok: true, approval });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/debug', async (req, res) => {
     try {
         const clientState = await client.getState().catch(e => e.message);
         const pageUrl = client.pupPage ? client.pupPage.url() : null;
-        res.json({
-            botState,
-            clientState,
-            info: client.info || null,
-            pageUrl
-        });
-    } catch (e) {
-        res.status(500).json({ error: e.message });
-    }
+        res.json({ botState, clientState, info: client.info || null, pageUrl });
+    } catch (e) { res.status(500).json({ error: e.message }); }
 });
+
 app.get('/api/screenshot', async (req, res) => {
     try {
-        if (!client.pupPage) return res.status(404).send("Page not available");
+        if (!client.pupPage) return res.status(404).send('Page not available');
         const img = await client.pupPage.screenshot();
         res.contentType('image/png').send(img);
-    } catch (e) {
-        res.status(500).send(e.message);
-    }
+    } catch (e) { res.status(500).send(e.message); }
 });
 
 io.on('connection', (socket) => socket.emit('state', botState));
