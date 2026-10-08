@@ -10,9 +10,42 @@ import { handleIncomingMessage, dispatchApprovedReply } from './services/ollamaA
 import { getLLMConfig, invalidateLLMCache } from './services/llmProvider.js';
 import { getCalendarConfig, invalidateCalendarCache } from './services/calendarProvider.js';
 import { getAllContactPolicies, upsertContactPolicy, deleteContactPolicy, getPendingApprovals, approveApproval, rejectApproval, invalidatePolicyCache } from './services/contactPolicy.js';
-import fs from 'fs';
+import { getGoogleAuthUrl, handleGoogleAuthCallback, isGoogleConfigured } from './services/googleOauth.js';
+import { existsSync, rmSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 
 const prisma = new PrismaClient();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const AUTH_DATA_PATH = path.resolve(__dirname, '../.wwebjs_auth');
+const SESSION_DIR = path.join(AUTH_DATA_PATH, 'session');
+
+/** Kill only Chromium/Chrome processes bound to this WhatsApp session dir. */
+function killStaleSessionBrowsers() {
+    try {
+        // Match the absolute session path so we never kill the user's normal Chrome.
+        execSync(`pkill -f ${JSON.stringify(SESSION_DIR)} || true`, { stdio: 'ignore' });
+    } catch {
+        // pkill exits non-zero when nothing matched — ignore.
+    }
+}
+
+/**
+ * After hard kills (Ctrl+C / kill -9 / crash), Chromium leaves Singleton* locks
+ * and may keep a browser alive on the same userDataDir. Clear both before init.
+ */
+function clearStaleChromiumLocks() {
+    killStaleSessionBrowsers();
+    for (const name of ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'DevToolsActivePort']) {
+        const lockPath = path.join(SESSION_DIR, name);
+        try {
+            if (existsSync(lockPath)) rmSync(lockPath, { force: true });
+        } catch (e) {
+            console.warn(`⚠️ Could not remove ${name}:`, e.message);
+        }
+    }
+}
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -40,10 +73,17 @@ async function syncConfig() {
 syncConfig();
 
 const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const chromeExecutablePath = process.env.PUPPETEER_EXECUTABLE_PATH || (existsSync(chromePath) ? chromePath : undefined);
+
 const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
+    authStrategy: new LocalAuth({ dataPath: AUTH_DATA_PATH }),
     puppeteer: {
         headless: true,
+        executablePath: chromeExecutablePath,
+        // Let our process handlers shut the browser down cleanly on stop/restart.
+        handleSIGINT: false,
+        handleSIGTERM: false,
+        handleSIGHUP: false,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -52,8 +92,7 @@ const client = new Client({
             '--no-first-run',
             '--no-zygote',
             '--disable-gpu'
-        ],
-        ...(fs.existsSync(chromePath) ? { executablePath: chromePath } : {})
+        ]
     }
 });
 
@@ -196,8 +235,25 @@ app.post('/api/logout', async (req, res) => {
     }
 });
 app.get('/api/logs', async (req, res) => {
-    const logs = await prisma.conversationLog.findMany({ take: 50, orderBy: { createdAt: 'desc' } });
-    res.json(logs);
+    const { limit = 100, offset = 0 } = req.query;
+    try {
+        // Validate and safely parse query parameters to prevent invalid Prisma invocation
+        const parsedLimit = Number.parseInt(limit, 10);
+        const parsedOffset = Number.parseInt(offset, 10);
+        const take = Number.isInteger(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 1000) : 100;
+        const skip = Number.isInteger(parsedOffset) ? Math.max(parsedOffset, 0) : 0;
+
+        const logs = await prisma.conversationLog.findMany({
+            take,
+            skip,
+            orderBy: { createdAt: 'desc' },
+            include: {}
+        });
+        res.json(logs);
+    } catch (e) {
+        console.error('Error fetching conversation logs:', e);
+        res.status(500).json({ error: 'Failed to fetch logs' });
+    }
 });
 
 // ── Feature #1: LLM Configuration ─────────────────────────────────────────────
@@ -232,8 +288,47 @@ app.post('/api/llm-config', async (req, res) => {
 app.get('/api/calendar-config', async (req, res) => {
     try {
         const config = await getCalendarConfig();
-        res.json(config);
+        res.json({
+            ...config,
+            authStatus: {
+                google: isGoogleConfigured() ? 'Authenticated' : 'Not configured',
+                macos: process.platform === 'darwin' ? 'Available' : 'Unavailable',
+                windows: process.platform === 'win32' ? 'Available' : 'Unavailable',
+            },
+        });
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/calendar/google-auth/init', (req, res) => {
+    try {
+        res.json(getGoogleAuthUrl());
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+app.get('/api/calendar/google-auth/callback', async (req, res) => {
+    const redirectUrl = new URL('http://localhost:3000/settings');
+
+    if (req.query.error) {
+        redirectUrl.searchParams.set('googleAuth', 'cancelled');
+        return res.redirect(302, redirectUrl.toString());
+    }
+
+    if (typeof req.query.code !== 'string' || !req.query.code) {
+        redirectUrl.searchParams.set('googleAuth', 'failed');
+        return res.redirect(302, redirectUrl.toString());
+    }
+
+    try {
+        await handleGoogleAuthCallback(req.query.code);
+        redirectUrl.searchParams.set('googleAuth', 'success');
+    } catch (e) {
+        console.error('Google OAuth callback failed:', e.message);
+        redirectUrl.searchParams.set('googleAuth', 'failed');
+    }
+
+    return res.redirect(302, redirectUrl.toString());
 });
 
 app.post('/api/calendar-config', async (req, res) => {
@@ -314,7 +409,134 @@ app.get('/api/screenshot', async (req, res) => {
     } catch (e) { res.status(500).send(e.message); }
 });
 
+// ── Feature: Conversation Log Management ──────────────────────────────────────
+app.post('/api/logs', async (req, res) => {
+    try {
+        const { chatId, senderName, message, response, type = 'text' } = req.body;
+
+        if (!chatId || !senderName || !message) {
+            return res.status(400).json({
+                error: 'Missing required fields: chatId, senderName, message'
+            });
+        }
+
+        const log = await prisma.conversationLog.create({
+            data: {
+                chatId,
+                senderName,
+                message,
+                response,
+                type,
+                createdAt: new Date()
+            }
+        });
+
+        res.status(201).json(log);
+    } catch (e) {
+        console.error('Error creating conversation log:', e);
+        res.status(500).json({ error: 'Failed to create log' });
+    }
+});
+
 io.on('connection', (socket) => socket.emit('state', botState));
 
-client.initialize();
-httpServer.listen(3001, () => console.log('Core Engine running on port 3001'));
+// Initialize WhatsApp client with better error handling
+let isInitializing = false;
+let isShuttingDown = false;
+
+async function initBot() {
+    if (isInitializing || isShuttingDown) return;
+    isInitializing = true;
+
+    try {
+        if (client.info) {
+            const readyInfo = client.info;
+            console.log(`🚀 WhatsApp Engine Already Ready! Logged in as: ${readyInfo.pushname || readyInfo.wid?.user}`);
+            io.emit('state', botState);
+            return;
+        }
+
+        console.log('🔄 Preparing WhatsApp Web session...');
+        clearStaleChromiumLocks();
+
+        console.log('🔄 Initializing WhatsApp Web...');
+        await client.initialize();
+
+        // Wait a moment for initialization events to fire
+        setTimeout(() => {
+            if (client.info) {
+                const info = client.info;
+                console.log(`✅ WhatsApp Web Ready! Logged in as: ${info.pushname || info.wid?.user}`);
+                io.emit('state', botState);
+            } else {
+                console.log('⚠️ WhatsApp initialization still in progress...');
+            }
+        }, 2000);
+    } catch (err) {
+        console.error('❌ WhatsApp initialization error:', err.message);
+
+        // One automatic recovery pass for leftover browser locks after hard stops.
+        if (/already running|userDataDir|SingletonLock/i.test(err.message || '')) {
+            console.log('🧹 Retrying after clearing stale browser locks...');
+            try {
+                clearStaleChromiumLocks();
+                await new Promise((r) => setTimeout(r, 500));
+                await client.initialize();
+                return;
+            } catch (retryErr) {
+                console.error('❌ WhatsApp re-initialization failed:', retryErr.message);
+                err = retryErr;
+            }
+        }
+
+        if (botState.status === 'ON') {
+            botState.connectionStatus = 'ERROR';
+            botState.error = err.message;
+            io.emit('state', botState);
+        }
+    } finally {
+        isInitializing = false;
+    }
+}
+
+async function shutdown(signal) {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`\n🛑 Shutting down core-engine (${signal})...`);
+
+    botState.connectionStatus = 'DISCONNECTED';
+    io.emit('state', botState);
+
+    try {
+        // Destroys the Puppeteer browser and releases the session userDataDir lock.
+        await client.destroy();
+        console.log('✅ WhatsApp client destroyed');
+    } catch (e) {
+        console.warn('WhatsApp destroy notice:', e.message);
+        killStaleSessionBrowsers();
+        clearStaleChromiumLocks();
+    }
+
+    try {
+        await prisma.$disconnect();
+    } catch (e) {
+        console.warn('Prisma disconnect notice:', e.message);
+    }
+
+    await new Promise((resolve) => {
+        httpServer.close(() => resolve());
+        setTimeout(resolve, 2000);
+    });
+
+    process.exit(0);
+}
+
+process.on('SIGINT', () => { shutdown('SIGINT'); });
+process.on('SIGTERM', () => { shutdown('SIGTERM'); });
+process.on('SIGHUP', () => { shutdown('SIGHUP'); });
+
+// Prevent double-init: only start WA after HTTP is listening.
+httpServer.listen(3001, async () => {
+    console.log('✅ Core Engine HTTP Server running on port 3001');
+    await initBot();
+});

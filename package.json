@@ -6,15 +6,25 @@
     "apps/*"
   ],
   "scripts": {
-    "stop": "lsof -ti :3001 | xargs kill -9 2>/dev/null; lsof -ti :3000 | xargs kill -9 2>/dev/null; pkill -f 'wwebjs_auth' 2>/dev/null; echo '✅ All processes stopped'",
+    "stop": "lsof -ti :3001 | xargs kill -15 2>/dev/null; lsof -ti :3000 | xargs kill -15 2>/dev/null; sleep 1; lsof -ti :3001 | xargs kill -9 2>/dev/null; lsof -ti :3000 | xargs kill -9 2>/dev/null; pkill -f '.wwebjs_auth/session' 2>/dev/null; echo '✅ All processes stopped'",
     "dev": "concurrently --names ENGINE,WEB --prefix-colors cyan,magenta \"npm run dev:engine\" \"npm run dev:web\"",
     "dev:engine": "npm --workspace=apps/core-engine run dev",
     "dev:web": "npm --workspace=apps/web-control-center run dev",
     "restart": "npm run stop && sleep 2 && npm run dev",
     "db:push": "npm --workspace=apps/core-engine run db:push",
+    "prisma:generate": "npm --workspace=apps/core-engine run prisma:generate",
     "setup:auth": "node apps/core-engine/src/scripts/setup_auth.js"
   },
   "devDependencies": {
-    "concurrently": "^8.2.2"
+    "concurrently": "^8.2.2",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "allowScripts": {
+    "prisma@5.22.0": true,
+    "@prisma/client@5.22.0": true,
+    "@prisma/engines@5.22.0": true,
+    "fsevents@2.3.3": true,
+    "puppeteer@24.38.0": true
   }
 }
