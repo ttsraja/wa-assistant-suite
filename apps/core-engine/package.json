@@ -3,12 +3,14 @@
     "type": "module",
     "scripts": {
         "dev": "node --watch-path=src src/server.js",
-        "db:push": "prisma db push"
+        "db:push": "prisma db push",
+        "prisma:generate": "prisma generate",
+        "postinstall": "prisma generate"
     },
     "dependencies": {
         "@anthropic-ai/sdk": "^0.131.0",
         "@google/generative-ai": "^0.24.1",
-        "@prisma/client": "^5.10.0",
+        "@prisma/client": "^5.22.0",
         "cors": "^2.8.5",
         "express": "^4.18.2",
         "googleapis": "^133.0.0",
@@ -19,6 +21,6 @@
         "whatsapp-web.js": "^1.23.0"
     },
     "devDependencies": {
-        "prisma": "^5.10.0"
+        "prisma": "^5.22.0"
     }
 }

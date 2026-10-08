@@ -115,6 +115,21 @@ const TABS = [
 // ── MAIN COMPONENT ─────────────────────────────────────────────────────────────
 export default function SettingsPage() {
     const [activeTab, setActiveTab] = useState("llm");
+    const [processing, setProcessing] = useState(null);
+
+    // Handle Google re-authentication (called from CalendarTab)
+    const handleGoogleAuth = useCallback(async () => {
+        setProcessing("google");
+        try {
+            const res = await fetch(`${API}/api/calendar/google-auth/init`);
+            const data = await res.json();
+            if (!res.ok) throw new Error(data.error || "Failed to start auth flow.");
+            window.location.assign(data.url);
+        } catch (error) {
+            alert(error.message || "Failed to start auth flow.");
+            setProcessing(null);
+        }
+    }, []);
 
     return (
         <div style={{ minHeight: "100vh", background: "linear-gradient(135deg,#0f172a 0%,#1e1b4b 50%,#0f172a 100%)", padding: "24px 20px", fontFamily: "'Inter',sans-serif" }}>
@@ -151,7 +166,12 @@ export default function SettingsPage() {
             {/* Tab Content */}
             <div style={{ maxWidth: 900, margin: "0 auto" }}>
                 {activeTab === "llm" && <LLMTab />}
-                {activeTab === "calendar" && <CalendarTab />}
+                {activeTab === "calendar" && (
+                    <CalendarTab
+                        handleGoogleAuth={handleGoogleAuth}
+                        processing={processing}
+                    />
+                )}
                 {activeTab === "contacts" && <ContactsTab />}
                 {activeTab === "approvals" && <ApprovalsTab />}
             </div>
@@ -290,13 +310,20 @@ function LLMTab() {
 }
 
 // ── TAB 2: Calendar & Tasks ───────────────────────────────────────────────────
-function CalendarTab() {
-    const [config, setConfig] = useState({ calendarProvider: "google", tasksProvider: "google" });
+function CalendarTab({ handleGoogleAuth, processing }) {
+    const [config, setConfig] = useState({ authStatus: { google: "Not configured", macos: "Not configured", windows: "Not configured" }, /* Add other config fields here */ });
     const [saving, setSaving] = useState(false);
     const [msg, setMsg] = useState(null);
 
     useEffect(() => {
-        fetch(`${API}/api/calendar-config`).then(r => r.json()).then(setConfig).catch(() => {});
+        fetch(`${API}/api/calendar-config`)
+            .then(r => r.json())
+            .then(data => setConfig(current => ({
+                ...current,
+                ...data,
+                authStatus: { ...current.authStatus, ...(data.authStatus || {}) },
+            })))
+            .catch(() => {});
     }, []);
 
     const handleSave = async () => {
@@ -326,10 +353,16 @@ function CalendarTab() {
                 <SectionTitle icon="📅">Calendar & Tasks Integration</SectionTitle>
 
                 <div style={{ marginBottom: 18 }}>
-                    <FormLabel>Calendar Provider (Read Availability)</FormLabel>
-                    <Select value={config.calendarProvider} onChange={e => setConfig(c => ({ ...c, calendarProvider: e.target.value }))}>
-                        {CALENDAR_PROVIDERS.map(p => <option key={p.value} value={p.value}>{p.label}</option>)}
-                    </Select>
+                    <FormLabel>Google Calendar Auth Status</FormLabel>
+                    <div style={{ display: "flex", alignItems: "center", gap: 16, marginTop: 8 }}>
+                        <Badge color={config.authStatus?.google === "Authenticated" ? "emerald" : "amber"}>
+                            {config.authStatus?.google || "Not configured"}
+                        </Badge>
+                        <button onClick={handleGoogleAuth} disabled={saving || processing}
+                            style={{ padding: "8px 18px", borderRadius: 8, border: "none", cursor: "pointer", background: "linear-gradient(135deg,#6366f1,#8b5cf6)", color: "#fff", fontWeight: 600, fontSize: 13 }}>
+                            {processing === "google" ? "Processing..." : "🔄 Re-authenticate Google"}
+                        </button>
+                    </div>
                 </div>
 
                 <div style={{ marginBottom: 22 }}>

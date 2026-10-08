@@ -18,31 +18,20 @@ export default function Dashboard() {
     const [isSaving, setIsSaving] = useState(false);
     const [engineOnline, setEngineOnline] = useState(true);
     const socketRef = useRef(null);
+    const [logOffset, setLogOffset] = useState(0);
+    const logScrollRef = useRef(null);
+    const socketConnected = useRef(false);
 
     // Initial fetch and socket subscription
     useEffect(() => {
         let isMounted = true;
 
-        // 1. Fetch current state
-        fetch("http://localhost:3001/api/state")
-            .then((res) => res.json())
-            .then((data) => {
-                if (!isMounted) return;
-                setState(data);
-                setContextInput(data.customContext || "");
-                setEngineOnline(true);
-            })
-            .catch((e) => {
-                console.error("Error fetching state:", e);
-                if (!isMounted) return;
-                setEngineOnline(false);
-            });
-
-        // 2. Fetch past conversation logs
-        fetch("http://localhost:3001/api/logs")
-            .then((res) => res.json())
-            .then((pastLogs) => {
-                if (!isMounted) return;
+        // Fetch logs with pagination (start fresh)
+        const fetchLogs = async () => {
+            try {
+                const res = await fetch("http://localhost:3001/api/logs?limit=100&offset=" + logOffset);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                const pastLogs = await res.json();
                 const formatted = (pastLogs || []).flatMap((l) => [
                     {
                         id: l.id + "-res",
@@ -60,23 +49,66 @@ export default function Dashboard() {
                         timestamp: new Date(l.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                     },
                 ]);
-                setLogs(formatted);
-            })
-            .catch((e) => {
+                if (isMounted) setLogs(formatted);
+            } catch (e) {
                 console.error("Error fetching logs:", e);
-            });
+                if (isMounted) {
+                    // Fetch from database fallback
+                    fetch("http://localhost:3001/api/logs")
+                        .then((res) => res.json())
+                        .then((pastLogs) => setLogs(formattedFromDB(pastLogs || [])))
+                        .catch(() => {});
+                }
+            }
+        };
 
-        // 3. Setup Socket.io
+        const formattedFromDB = (pastLogs) => {
+            return (pastLogs || []).flatMap((l) => [
+                {
+                    id: l.id + "-res",
+                    from: "AI Assistant",
+                    message: l.response,
+                    isBot: true,
+                    toolsUsed: l.toolsUsed ? JSON.parse(l.toolsUsed) : [],
+                    timestamp: new Date(l.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                },
+                {
+                    id: l.id + "-msg",
+                    from: l.senderName || "Contact",
+                    message: l.message,
+                    isBot: false,
+                    timestamp: new Date(l.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                },
+            ]);
+        };
+
+        fetchLogs();
+
+        // 3. Setup Socket.io with reconnection handling
         const socket = io("http://localhost:3001", {
-            reconnectionAttempts: 10,
-            timeout: 5000,
+            reconnectionAttempts: Infinity,
+            timeout: 10000,
+            reconnectInterval: 5000,
         });
         socketRef.current = socket;
 
         socket.on("connect", () => {
+            console.log("Socket connected");
             setEngineOnline(true);
+            socketConnected.current = true;
+
+            // Re-fetch logs when socket reconnected to get any missed messages
+            fetchLogs();
         });
-        socket.on("disconnect", () => {
+
+        socket.on("disconnect", (reason) => {
+            console.log("Socket disconnected:", reason);
+            setEngineOnline(false);
+            socketConnected.current = false;
+        });
+
+        socket.on("connect_error", (err) => {
+            console.error("Socket connection error:", err.message);
             setEngineOnline(false);
         });
 
@@ -89,7 +121,7 @@ export default function Dashboard() {
 
         socket.on("live_log", (log) => {
             // Only process and display logs if the component is mounted
-            if (!isMounted) return;
+            if (!isMounted || !socketConnected.current) return;
 
             setLogs((prev) => [
                 {
@@ -101,8 +133,8 @@ export default function Dashboard() {
                     toolsUsed: log.toolsUsed || [],
                     timestamp: log.timestamp || new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
                 },
-                ...prev,
-            ].slice(0, 30));
+                ...prev.slice(0, 29), // Keep max 30 messages
+            ]);
         });
 
         // Cleanup function
@@ -328,11 +360,25 @@ export default function Dashboard() {
                         </span>
                     </div>
 
-                    <div className="feed-scroll">
+                    <div
+                        className="feed-scroll"
+                        ref={logScrollRef}
+                        onScroll={(e) => {
+                            // Auto-scroll to bottom when socket is connected and user is at bottom
+                            if (socketConnected.current && logScrollRef.current) {
+                                const { scrollTop, scrollHeight, clientHeight } = logScrollRef.current;
+                                const isNearBottom = scrollHeight - scrollTop <= clientHeight + 100;
+                                if (isNearBottom && logs.length > 29) {
+                                    logScrollRef.current.scrollTop = logScrollRef.current.scrollHeight;
+                                }
+                            }
+                        }}
+                    >
                         {logs.map((log) => (
                             <div
                                 key={log.id}
                                 className={`log-entry ${log.isBot ? "bot-reply" : "user-msg"}`}
+                                style={{ animation: "fadeIn 0.2s ease-out" }}
                             >
                                 <div className="log-header">
                                     <span className={`log-sender ${log.isBot ? "bot" : "user"}`}>

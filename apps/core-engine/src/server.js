@@ -10,7 +10,8 @@ import { handleIncomingMessage, dispatchApprovedReply } from './services/ollamaA
 import { getLLMConfig, invalidateLLMCache } from './services/llmProvider.js';
 import { getCalendarConfig, invalidateCalendarCache } from './services/calendarProvider.js';
 import { getAllContactPolicies, upsertContactPolicy, deleteContactPolicy, getPendingApprovals, approveApproval, rejectApproval, invalidatePolicyCache } from './services/contactPolicy.js';
-import fs from 'fs';
+import { getGoogleAuthUrl, handleGoogleAuthCallback, isGoogleConfigured } from './services/googleOauth.js';
+import { existsSync } from 'fs';
 
 const prisma = new PrismaClient();
 const app = express();
@@ -40,10 +41,13 @@ async function syncConfig() {
 syncConfig();
 
 const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const chromeExecutablePath = process.env.PUPPETEER_EXECUTABLE_PATH || (existsSync(chromePath) ? chromePath : undefined);
+
 const client = new Client({
     authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
     puppeteer: {
         headless: true,
+        executablePath: chromeExecutablePath,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -52,8 +56,7 @@ const client = new Client({
             '--no-first-run',
             '--no-zygote',
             '--disable-gpu'
-        ],
-        ...(fs.existsSync(chromePath) ? { executablePath: chromePath } : {})
+        ]
     }
 });
 
@@ -196,8 +199,25 @@ app.post('/api/logout', async (req, res) => {
     }
 });
 app.get('/api/logs', async (req, res) => {
-    const logs = await prisma.conversationLog.findMany({ take: 50, orderBy: { createdAt: 'desc' } });
-    res.json(logs);
+    const { limit = 100, offset = 0 } = req.query;
+    try {
+        // Validate and safely parse query parameters to prevent invalid Prisma invocation
+        const parsedLimit = Number.parseInt(limit, 10);
+        const parsedOffset = Number.parseInt(offset, 10);
+        const take = Number.isInteger(parsedLimit) ? Math.min(Math.max(parsedLimit, 1), 1000) : 100;
+        const skip = Number.isInteger(parsedOffset) ? Math.max(parsedOffset, 0) : 0;
+
+        const logs = await prisma.conversationLog.findMany({
+            take,
+            skip,
+            orderBy: { createdAt: 'desc' },
+            include: {}
+        });
+        res.json(logs);
+    } catch (e) {
+        console.error('Error fetching conversation logs:', e);
+        res.status(500).json({ error: 'Failed to fetch logs' });
+    }
 });
 
 // ── Feature #1: LLM Configuration ─────────────────────────────────────────────
@@ -232,8 +252,47 @@ app.post('/api/llm-config', async (req, res) => {
 app.get('/api/calendar-config', async (req, res) => {
     try {
         const config = await getCalendarConfig();
-        res.json(config);
+        res.json({
+            ...config,
+            authStatus: {
+                google: isGoogleConfigured() ? 'Authenticated' : 'Not configured',
+                macos: process.platform === 'darwin' ? 'Available' : 'Unavailable',
+                windows: process.platform === 'win32' ? 'Available' : 'Unavailable',
+            },
+        });
     } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/calendar/google-auth/init', (req, res) => {
+    try {
+        res.json(getGoogleAuthUrl());
+    } catch (e) {
+        res.status(400).json({ error: e.message });
+    }
+});
+
+app.get('/api/calendar/google-auth/callback', async (req, res) => {
+    const redirectUrl = new URL('http://localhost:3000/settings');
+
+    if (req.query.error) {
+        redirectUrl.searchParams.set('googleAuth', 'cancelled');
+        return res.redirect(302, redirectUrl.toString());
+    }
+
+    if (typeof req.query.code !== 'string' || !req.query.code) {
+        redirectUrl.searchParams.set('googleAuth', 'failed');
+        return res.redirect(302, redirectUrl.toString());
+    }
+
+    try {
+        await handleGoogleAuthCallback(req.query.code);
+        redirectUrl.searchParams.set('googleAuth', 'success');
+    } catch (e) {
+        console.error('Google OAuth callback failed:', e.message);
+        redirectUrl.searchParams.set('googleAuth', 'failed');
+    }
+
+    return res.redirect(302, redirectUrl.toString());
 });
 
 app.post('/api/calendar-config', async (req, res) => {
@@ -314,7 +373,74 @@ app.get('/api/screenshot', async (req, res) => {
     } catch (e) { res.status(500).send(e.message); }
 });
 
+// ── Feature: Conversation Log Management ──────────────────────────────────────
+app.post('/api/logs', async (req, res) => {
+    try {
+        const { chatId, senderName, message, response, type = 'text' } = req.body;
+
+        if (!chatId || !senderName || !message) {
+            return res.status(400).json({
+                error: 'Missing required fields: chatId, senderName, message'
+            });
+        }
+
+        const log = await prisma.conversationLog.create({
+            data: {
+                chatId,
+                senderName,
+                message,
+                response,
+                type,
+                createdAt: new Date()
+            }
+        });
+
+        res.status(201).json(log);
+    } catch (e) {
+        console.error('Error creating conversation log:', e);
+        res.status(500).json({ error: 'Failed to create log' });
+    }
+});
+
 io.on('connection', (socket) => socket.emit('state', botState));
 
-client.initialize();
-httpServer.listen(3001, () => console.log('Core Engine running on port 3001'));
+// Initialize WhatsApp client with better error handling
+async function initBot() {
+    try {
+        if (client.info) {
+            // Bot already initialized, update state
+            const readyInfo = client.info;
+            console.log(`🚀 WhatsApp Engine Already Ready! Logged in as: ${readyInfo.pushname || readyInfo.wid?.user}`);
+            io.emit('state', botState);
+            return;
+        }
+
+        console.log('🔄 Initializing WhatsApp Web...');
+        await client.initialize();
+
+        // Wait a moment for initialization events to fire
+        setTimeout(() => {
+            if (client.info) {
+                const info = client.info;
+                console.log(`✅ WhatsApp Web Ready! Logged in as: ${info.pushname || info.wid?.user}`);
+                io.emit('state', botState);
+            } else {
+                console.log('⚠️ WhatsApp initialization still in progress...');
+            }
+        }, 2000);
+    } catch (err) {
+        console.error('❌ WhatsApp initialization error:', err.message);
+        if (botState.status === 'ON') {
+            botState.connectionStatus = 'ERROR';
+            botState.error = err.message;
+            io.emit('state', botState);
+        }
+    }
+}
+
+initBot();
+httpServer.listen(3001, async () => {
+    console.log('✅ Core Engine HTTP Server running on port 3001');
+    // Start bot initialization after server is ready
+    await initBot();
+});

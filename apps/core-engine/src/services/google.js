@@ -1,36 +1,9 @@
-import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { google } from 'googleapis';
-
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-
-function resolveConfigPath(filename) {
-    const cwdPath = path.resolve(process.cwd(), filename);
-    if (fs.existsSync(cwdPath)) return cwdPath;
-    const coreEnginePath = path.resolve(__dirname, '../../', filename);
-    if (fs.existsSync(coreEnginePath)) return coreEnginePath;
-    return cwdPath;
-}
-
-const credentialsPath = resolveConfigPath('credentials.json');
-const tokenPath = resolveConfigPath('token.json');
-
-async function getAuthClient() {
-    if (!fs.existsSync(credentialsPath) || !fs.existsSync(tokenPath)) {
-        throw new Error("Google credentials or token missing.");
-    }
-    const credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
-    const token = JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
-    const { client_secret, client_id, redirect_uris } = credentials.installed || credentials.web;
-    const oAuth2Client = new google.auth.OAuth2(client_id, client_secret, redirect_uris[0]);
-    oAuth2Client.setCredentials(token);
-    return oAuth2Client;
-}
+import { getGoogleAuthClient } from './googleOauth.js';
 
 export async function recordUserNote(rawArgs) {
     try {
-        const auth = await getAuthClient();
+        const auth = getGoogleAuthClient();
         const tasksApi = google.tasks({ version: 'v1', auth });
 
         const senderId = rawArgs.senderId || 'Unknown ID';
@@ -68,7 +41,7 @@ export async function recordUserNote(rawArgs) {
 
 export async function getUpcomingSchedule() {
     try {
-        const auth = await getAuthClient();
+        const auth = getGoogleAuthClient();
         const calendar = google.calendar({ version: 'v3', auth });
 
         const startOfDay = new Date();

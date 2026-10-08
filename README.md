@@ -55,6 +55,16 @@ The dashboard will typically be accessible at `http://localhost:3000`.
 *   **API Keys:** Update environment variables (`.env`) in the root directory with necessary credentials (Google API keys, etc.).
 *   **LLM Model:** Ensure the required model (e.g., `gemma4`) is pulled and running via Ollama: `ollama pull gemma4`.
 
+#### Google Calendar and Tasks OAuth
+
+To connect Google Calendar and Google Tasks from **Settings → Calendar & Tasks**, create a Google OAuth **Web application** client and add this authorized redirect URI in Google Cloud Console:
+
+```
+http://localhost:3001/api/calendar/google-auth/callback
+```
+
+Then either place the downloaded OAuth client JSON at `apps/core-engine/credentials.json`, or set `GOOGLE_OAUTH_CLIENT_ID` and `GOOGLE_OAUTH_CLIENT_SECRET` in the environment that starts the core engine. Restart the engine and choose **Re-authenticate Google** in Settings. The generated `token.json` stays local and is ignored by Git.
+
 ## 📚 Project Documentation
 
 For a detailed, technical breakdown of the system's components, please refer to the [Project Summary](/Users/ttthangasenthilraja/Documents/wa-assistant-suite/project summary.md).
