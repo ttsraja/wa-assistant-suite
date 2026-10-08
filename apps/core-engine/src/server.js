@@ -11,9 +11,41 @@ import { getLLMConfig, invalidateLLMCache } from './services/llmProvider.js';
 import { getCalendarConfig, invalidateCalendarCache } from './services/calendarProvider.js';
 import { getAllContactPolicies, upsertContactPolicy, deleteContactPolicy, getPendingApprovals, approveApproval, rejectApproval, invalidatePolicyCache } from './services/contactPolicy.js';
 import { getGoogleAuthUrl, handleGoogleAuthCallback, isGoogleConfigured } from './services/googleOauth.js';
-import { existsSync } from 'fs';
+import { existsSync, rmSync } from 'fs';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { execSync } from 'child_process';
 
 const prisma = new PrismaClient();
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const AUTH_DATA_PATH = path.resolve(__dirname, '../.wwebjs_auth');
+const SESSION_DIR = path.join(AUTH_DATA_PATH, 'session');
+
+/** Kill only Chromium/Chrome processes bound to this WhatsApp session dir. */
+function killStaleSessionBrowsers() {
+    try {
+        // Match the absolute session path so we never kill the user's normal Chrome.
+        execSync(`pkill -f ${JSON.stringify(SESSION_DIR)} || true`, { stdio: 'ignore' });
+    } catch {
+        // pkill exits non-zero when nothing matched — ignore.
+    }
+}
+
+/**
+ * After hard kills (Ctrl+C / kill -9 / crash), Chromium leaves Singleton* locks
+ * and may keep a browser alive on the same userDataDir. Clear both before init.
+ */
+function clearStaleChromiumLocks() {
+    killStaleSessionBrowsers();
+    for (const name of ['SingletonLock', 'SingletonSocket', 'SingletonCookie', 'DevToolsActivePort']) {
+        const lockPath = path.join(SESSION_DIR, name);
+        try {
+            if (existsSync(lockPath)) rmSync(lockPath, { force: true });
+        } catch (e) {
+            console.warn(`⚠️ Could not remove ${name}:`, e.message);
+        }
+    }
+}
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -44,10 +76,14 @@ const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
 const chromeExecutablePath = process.env.PUPPETEER_EXECUTABLE_PATH || (existsSync(chromePath) ? chromePath : undefined);
 
 const client = new Client({
-    authStrategy: new LocalAuth({ dataPath: './.wwebjs_auth' }),
+    authStrategy: new LocalAuth({ dataPath: AUTH_DATA_PATH }),
     puppeteer: {
         headless: true,
         executablePath: chromeExecutablePath,
+        // Let our process handlers shut the browser down cleanly on stop/restart.
+        handleSIGINT: false,
+        handleSIGTERM: false,
+        handleSIGHUP: false,
         args: [
             '--no-sandbox',
             '--disable-setuid-sandbox',
@@ -405,15 +441,23 @@ app.post('/api/logs', async (req, res) => {
 io.on('connection', (socket) => socket.emit('state', botState));
 
 // Initialize WhatsApp client with better error handling
+let isInitializing = false;
+let isShuttingDown = false;
+
 async function initBot() {
+    if (isInitializing || isShuttingDown) return;
+    isInitializing = true;
+
     try {
         if (client.info) {
-            // Bot already initialized, update state
             const readyInfo = client.info;
             console.log(`🚀 WhatsApp Engine Already Ready! Logged in as: ${readyInfo.pushname || readyInfo.wid?.user}`);
             io.emit('state', botState);
             return;
         }
+
+        console.log('🔄 Preparing WhatsApp Web session...');
+        clearStaleChromiumLocks();
 
         console.log('🔄 Initializing WhatsApp Web...');
         await client.initialize();
@@ -430,17 +474,69 @@ async function initBot() {
         }, 2000);
     } catch (err) {
         console.error('❌ WhatsApp initialization error:', err.message);
+
+        // One automatic recovery pass for leftover browser locks after hard stops.
+        if (/already running|userDataDir|SingletonLock/i.test(err.message || '')) {
+            console.log('🧹 Retrying after clearing stale browser locks...');
+            try {
+                clearStaleChromiumLocks();
+                await new Promise((r) => setTimeout(r, 500));
+                await client.initialize();
+                return;
+            } catch (retryErr) {
+                console.error('❌ WhatsApp re-initialization failed:', retryErr.message);
+                err = retryErr;
+            }
+        }
+
         if (botState.status === 'ON') {
             botState.connectionStatus = 'ERROR';
             botState.error = err.message;
             io.emit('state', botState);
         }
+    } finally {
+        isInitializing = false;
     }
 }
 
-initBot();
+async function shutdown(signal) {
+    if (isShuttingDown) return;
+    isShuttingDown = true;
+    console.log(`\n🛑 Shutting down core-engine (${signal})...`);
+
+    botState.connectionStatus = 'DISCONNECTED';
+    io.emit('state', botState);
+
+    try {
+        // Destroys the Puppeteer browser and releases the session userDataDir lock.
+        await client.destroy();
+        console.log('✅ WhatsApp client destroyed');
+    } catch (e) {
+        console.warn('WhatsApp destroy notice:', e.message);
+        killStaleSessionBrowsers();
+        clearStaleChromiumLocks();
+    }
+
+    try {
+        await prisma.$disconnect();
+    } catch (e) {
+        console.warn('Prisma disconnect notice:', e.message);
+    }
+
+    await new Promise((resolve) => {
+        httpServer.close(() => resolve());
+        setTimeout(resolve, 2000);
+    });
+
+    process.exit(0);
+}
+
+process.on('SIGINT', () => { shutdown('SIGINT'); });
+process.on('SIGTERM', () => { shutdown('SIGTERM'); });
+process.on('SIGHUP', () => { shutdown('SIGHUP'); });
+
+// Prevent double-init: only start WA after HTTP is listening.
 httpServer.listen(3001, async () => {
     console.log('✅ Core Engine HTTP Server running on port 3001');
-    // Start bot initialization after server is ready
     await initBot();
 });

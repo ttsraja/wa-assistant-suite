@@ -6,7 +6,7 @@
     "apps/*"
   ],
   "scripts": {
-    "stop": "lsof -ti :3001 | xargs kill -9 2>/dev/null; lsof -ti :3000 | xargs kill -9 2>/dev/null; pkill -f 'wwebjs_auth' 2>/dev/null; echo '✅ All processes stopped'",
+    "stop": "lsof -ti :3001 | xargs kill -15 2>/dev/null; lsof -ti :3000 | xargs kill -15 2>/dev/null; sleep 1; lsof -ti :3001 | xargs kill -9 2>/dev/null; lsof -ti :3000 | xargs kill -9 2>/dev/null; pkill -f '.wwebjs_auth/session' 2>/dev/null; echo '✅ All processes stopped'",
     "dev": "concurrently --names ENGINE,WEB --prefix-colors cyan,magenta \"npm run dev:engine\" \"npm run dev:web\"",
     "dev:engine": "npm --workspace=apps/core-engine run dev",
     "dev:web": "npm --workspace=apps/web-control-center run dev",
