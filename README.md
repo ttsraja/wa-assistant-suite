@@ -97,6 +97,18 @@ Prefer `npm run stop` / Ctrl+C over raw `kill -9` so the browser can shut down c
 
 In **Settings → LLM**, choose provider, model, and API key/base URL. Values are stored in SQLite (`LLMConfig`), not committed to git.
 
+| Provider | Typical model examples | Notes |
+| :--- | :--- | :--- |
+| `ollama` | `gemma4:latest`, other local tags | Default; no API key; requires Ollama running on `localhost:11434` |
+| `gemini` | `gemini-2.0-flash`, `gemini-1.5-flash`, `gemini-1.5-pro` | Google AI Studio / Generative Language API key; use a **real** Gemini model id |
+| `claude` | `claude-3-5-haiku-20241022`, `claude-sonnet-4-…` | Anthropic API key |
+| `openai` | `gpt-4o-mini`, `gpt-4o` | OpenAI API key; optional custom `baseUrl` |
+| `grok` | xAI chat models | xAI API key; default base URL `https://api.x.ai/v1` |
+
+**How providers plug in:** `ollamaAgent.js` always speaks a unified Ollama-style chat shape (`messages` + optional `tools` → `{ message: { content, tool_calls } }`). `llmProvider.js` is the only place that translates that into each vendor’s wire format (Gemini `systemInstruction` + `contents` / `functionCall`+`functionResponse`, Claude `system` + `tool_use`/`tool_result`, OpenAI/Grok `tool_calls` + `tool_call_id`). Switching providers in Settings should not require agent-loop changes.
+
+After changing provider/model/key, the engine re-reads `LLMConfig` within a short cache TTL (or restart if you want an immediate clean slate).
+
 ### Google Calendar / Tasks OAuth
 
 1. Create a Google OAuth **Web application** client
@@ -131,7 +143,7 @@ Configure per-contact rules and review the approval queue in the web control cen
 | `npm run restart` | `stop` → brief wait → `dev` |
 | `npm run db:push` | Prisma schema → SQLite |
 | `npm run prisma:generate` | Regenerate `@prisma/client` |
-| `npm run setup:auth` | Auth helper script |
+| `npm run setup:auth` | **Broken today** — points at missing `apps/core-engine/src/scripts/setup_auth.js` |
 
 ## What is not committed
 
@@ -147,8 +159,10 @@ Keep only source, Prisma **schema**, manifests, and docs in git.
 
 ## Documentation
 
-- [Project summary](./project%20summary.md) — architecture and message flow
-- `AGENTS.md` — agent-oriented project guidance
+- `AGENTS.md` — **single source of truth** for architecture, message flow, and development commands (coding agents / Warp)
+- [Project summary](./project%20summary.md) — technical overview (domain model, API surface, integrations)
+- `CLAUDE.md` — Claude Code entrypoint; defers to `AGENTS.md` (do not duplicate architecture there)
+- This README — human setup and operator configuration
 
 ## Ports
 

@@ -24,7 +24,9 @@ const agentTools = [
         type: 'function',
         function: {
             name: 'recordUserNote',
-            description: 'Record an urgent message, brief note, or meeting request from the sender.',
+            description:
+                "Record ONE urgent message, brief note, or meeting request from the sender for Thanga. " +
+                "Call at most ONCE per user message. Never retry or call again after success or NOTE_ALREADY_RECORDED.",
             parameters: {
                 type: 'object',
                 properties: {
@@ -79,9 +81,11 @@ CALENDAR & FREE SLOT SUGGESTIONS:
 - IMPORTANT: You CANNOT create, book, or block calendar events. You can only CHECK availability and RECORD a meeting request note for Thanga to action. Never tell someone you have "confirmed", "booked", or "blocked" a meeting — always say you have "noted the request" and that Thanga will confirm directly.
 
 TOOL CALLING RULES:
-1. If the sender leaves a note/message, requests a callback, or wants to arrange a meeting, YOU MUST CALL 'recordUserNote' to log it for Thanga.
-2. If the sender asks for his calendar, availability, or free slots, YOU MUST CALL 'getUpcomingSchedule'.
-3. After recording a meeting request, say: "I've noted your request for [time] and passed it to Thanga — he'll confirm with you directly." 🙏
+1. If the sender leaves a note/message, requests a callback, or wants to arrange a meeting, call 'recordUserNote' EXACTLY ONCE to log it for Thanga.
+2. NEVER call 'recordUserNote' more than once for the same user message. If the tool returns success or NOTE_ALREADY_RECORDED, do not call it again — just reply to the user.
+3. If the sender asks for his calendar, availability, or free slots, call 'getUpcomingSchedule' (once is enough unless they ask again later).
+4. After recording a meeting request, say: "I've noted your request for [time] and passed it to Thanga — he'll confirm with you directly." 🙏
+5. Do not invent extra tool calls, retries, or "updates" to the same note.
 
 GREETING RULES:
 - Greet the user ONLY on the FIRST message of a conversation session.
@@ -116,6 +120,7 @@ export async function handleIncomingMessage(msg, botState, io) {
     io.emit('live_log', {
         id: Date.now() + Math.random(),
         from: displayName,
+        contactId: userId,
         message: msg.body,
         isBot: false,
         paused: botState.status !== 'ON',
@@ -211,18 +216,37 @@ export async function handleIncomingMessage(msg, botState, io) {
     history.push({ role: 'user', content: msg.body });
 
     let toolsUsedList = [];
+    // Per-inbound-message tool guardrails (LLM may retry the same tool in a loop)
+    let noteWritesThisMessage = 0;
+    let scheduleFetchesThisMessage = 0;
+    let toolRounds = 0;
+    const MAX_TOOL_ROUNDS = 4;
+    const MAX_NOTE_WRITES_PER_MESSAGE = 1;
+    const MAX_SCHEDULE_FETCHES_PER_MESSAGE = 2;
 
     try {
         let response = await llmChat({ messages: history, tools: agentTools });
 
         while (response.message.tool_calls && response.message.tool_calls.length > 0) {
+            toolRounds += 1;
+            if (toolRounds > MAX_TOOL_ROUNDS) {
+                console.warn(`Tool loop cap reached (${MAX_TOOL_ROUNDS}) for ${userId} — stopping further tool calls.`);
+                history.push({
+                    role: 'tool',
+                    content: 'TOOL_LOOP_LIMIT: Too many tool rounds for this message. Stop calling tools and reply to the user now.'
+                });
+                // One final text-only completion without tools
+                response = await llmChat({ messages: history, tools: [] });
+                break;
+            }
+
             history.push(response.message);
 
             for (const toolCall of response.message.tool_calls) {
-                const rawFnName = toolCall.function.name;
+                const rawFnName = toolCall.function?.name || toolCall.name || '';
                 toolsUsedList.push(rawFnName);
 
-                let fnArgs = toolCall.function.arguments || {};
+                let fnArgs = toolCall.function?.arguments ?? toolCall.arguments ?? {};
                 if (typeof fnArgs === 'string') {
                     try { fnArgs = JSON.parse(fnArgs); } catch { fnArgs = {}; }
                 }
@@ -235,13 +259,33 @@ export async function handleIncomingMessage(msg, botState, io) {
 
                 let toolResult;
                 try {
-                    if (rawFnName === 'getUpcomingSchedule' || rawFnName.includes('Schedule')) {
-                        if (isNewSession) {
-                            await msg.reply(`${firstName ? 'Hi ' + firstName + '! ' : ''}Give me a moment, checking Thanga's schedule... 🗓️`);
+                    const isScheduleTool = rawFnName === 'getUpcomingSchedule' || /schedule/i.test(rawFnName);
+                    const isNoteTool = rawFnName === 'recordUserNote' || /note/i.test(rawFnName);
+
+                    if (isScheduleTool) {
+                        if (scheduleFetchesThisMessage >= MAX_SCHEDULE_FETCHES_PER_MESSAGE) {
+                            toolResult = 'SCHEDULE_ALREADY_FETCHED: Calendar was already checked for this message. Use the previous result and reply to the user.';
+                        } else {
+                            scheduleFetchesThisMessage += 1;
+                            if (isNewSession && scheduleFetchesThisMessage === 1) {
+                                await msg.reply(`${firstName ? 'Hi ' + firstName + '! ' : ''}Give me a moment, checking Thanga's schedule... 🗓️`);
+                            }
+                            toolResult = await getUpcomingSchedule();
                         }
-                        toolResult = await getUpcomingSchedule();
-                    } else if (rawFnName === 'recordUserNote' || rawFnName.includes('Note')) {
-                        toolResult = await recordUserNote(fnArgs);
+                    } else if (isNoteTool) {
+                        if (noteWritesThisMessage >= MAX_NOTE_WRITES_PER_MESSAGE) {
+                            console.warn(`📌 Skipping duplicate recordUserNote for ${userId} (already wrote ${noteWritesThisMessage} this message)`);
+                            toolResult =
+                                'NOTE_ALREADY_RECORDED: recordUserNote was already called once for this user message. ' +
+                                'Do NOT call it again. Acknowledge the note to the user and finish.';
+                        } else {
+                            noteWritesThisMessage += 1;
+                            toolResult = await recordUserNote(fnArgs);
+                            // If provider-level dedupe fired, still counts as the one allowed write attempt
+                            if (typeof toolResult === 'string' && toolResult.startsWith('NOTE_ALREADY_RECORDED')) {
+                                console.log(`📌 Provider dedupe for ${userId}`);
+                            }
+                        }
                     } else {
                         toolResult = 'ERROR: Unknown tool.';
                     }
@@ -253,7 +297,16 @@ export async function handleIncomingMessage(msg, botState, io) {
                 history.push({ role: 'tool', content: typeof toolResult === 'string' ? toolResult : JSON.stringify(toolResult) });
             }
 
-            response = await llmChat({ messages: history, tools: agentTools });
+            // After the one allowed note write, remove recordUserNote so the model cannot re-select it.
+            // Schedule tool remains available if still needed this turn.
+            let toolsForNext = agentTools;
+            if (noteWritesThisMessage >= MAX_NOTE_WRITES_PER_MESSAGE) {
+                toolsForNext = agentTools.filter((t) => t.function?.name !== 'recordUserNote');
+            }
+            if (scheduleFetchesThisMessage >= MAX_SCHEDULE_FETCHES_PER_MESSAGE) {
+                toolsForNext = toolsForNext.filter((t) => t.function?.name !== 'getUpcomingSchedule');
+            }
+            response = await llmChat({ messages: history, tools: toolsForNext });
         }
 
         const replyText = response.message.content?.trim() || "I'll pass your message to Thanga. 🙏";
@@ -272,6 +325,7 @@ export async function handleIncomingMessage(msg, botState, io) {
         io.emit('live_log', {
             id: Date.now() + Math.random(),
             from: 'AI Assistant',
+            contactId: userId,
             message: replyText,
             isBot: true,
             toolsUsed: toolsUsedList,
@@ -310,6 +364,7 @@ export async function dispatchApprovedReply(approvalId, replyText, client, io) {
     io.emit('live_log', {
         id: Date.now() + Math.random(),
         from: 'AI Assistant (Approved)',
+        contactId: userId,
         message: replyText,
         isBot: true,
         timestamp: new Date().toLocaleTimeString('en-IN', { timeZone: 'Asia/Kolkata', hour: '2-digit', minute: '2-digit' })
