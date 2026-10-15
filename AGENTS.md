@@ -1,157 +1,133 @@
 # AGENTS.md
 
-Guidance for coding agents working in this repository.
+This file provides guidance to WARP (warp.dev) when working with code in this repository.
 
-***
+## Architecture
 
-## Architectural Overview
+npm **workspaces** monorepo (`apps/*`). Runtime loop: WhatsApp DM → contact policy → LLM draft (optional calendar/task tools) → auto-send or approval queue → conversation log.
 
-The WhatsApp AI Assistant Suite is an npm **workspaces** monorepo. The core loop is: receive a WhatsApp DM → apply contact policy → generate an LLM draft (optional tools for calendar/tasks) → auto-send or hold in the approval queue → log the outcome.
+| Path | Role |
+| :--- | :--- |
+| `apps/core-engine` | Backend **:3001** — WhatsApp (`whatsapp-web.js` + Puppeteer/Chrome), Express REST, Socket.IO `state`, Prisma/SQLite, orchestration |
+| `apps/web-control-center` | Next.js **:3000** — live status/QR, logs, settings, approval queue. Talks to engine over REST/Socket.IO only (no WhatsApp or Prisma) |
+| `packages/` | Reserved for shared non-UI utilities; empty/placeholder today — logic lives in core-engine |
 
-**Primary modules**
+**Entrypoint:** `apps/core-engine/src/server.js` — WA client lifecycle, HTTP routes, Socket.IO, graceful shutdown, in-memory `botState` synced from Prisma `Config`.
 
-1. **`apps/core-engine`** (backend, port **3001**)
-   - WhatsApp Web client (`whatsapp-web.js` + Puppeteer/Chrome)
-   - Express REST API + Socket.IO live `state`
-   - Prisma/SQLite persistence
-   - Orchestrates LLM, calendar/tasks, policies, approvals, outbound sends
-   - Entrypoint: `src/server.js`
+### Message flow
 
-2. **`apps/web-control-center`** (Next.js UI, port **3000**)
-   - Dashboard for connection status, QR, logs, settings, approval queue
-   - Talks to core-engine over REST/Socket.IO only (no direct WhatsApp access)
+1. Connect — clear stale Chromium session locks, `LocalAuth` under `.wwebjs_auth`, emit QR / READY via Socket.IO
+2. Receive — `message_create`; ignore groups, status/broadcast, self, empty bodies, pre-startup timestamps
+3. Govern — `contactPolicy` (tone, info level, restricted topics, `requiresApproval`, custom instructions)
+4. Decide — `ollamaAgent.handleIncomingMessage` → `llmChat({ messages, tools })`; tools may read calendar / create tasks
+5. Approve (optional) — `PendingApproval`; UI approve (optional edit) / reject → `dispatchApprovedReply`
+6. Send + log — WhatsApp send + `ConversationLog`
 
-3. **`packages/`**
-   - Reserved for shared non-UI utilities; runtime logic today lives under `apps/core-engine`
-
-**Core engine services** (`apps/core-engine/src/services/`)
+### Core engine services (`apps/core-engine/src/services/`)
 
 | File | Role |
 | :--- | :--- |
-| `ollamaAgent.js` | Incoming message pipeline, tools, reply dispatch |
-| `llmProvider.js` | Multi-provider chat (ollama \| gemini \| claude \| openai \| grok) |
-| `calendarProvider.js` | Calendar read + task write backends |
+| `ollamaAgent.js` | Incoming pipeline, tool loop, reply dispatch — **provider-agnostic** |
+| `llmProvider.js` | Multi-provider `llmChat` + vendor wire-format adapters only |
+| `calendarProvider.js` | Calendar read + task write (google \| macos \| windows) |
 | `contactPolicy.js` | Per-contact rules + pending approval CRUD |
-| `google.js` | Google Calendar/Tasks API |
-| `googleOauth.js` | Google OAuth init/callback + local tokens |
+| `google.js` / `googleOauth.js` | Google Calendar/Tasks API + OAuth tokens |
 
-***
+### LLM provider contract
 
-## System Domains
+- **Unified shape:** `llmChat({ messages, tools })` → `{ message: { content, tool_calls? } }` (Ollama-style)
+- Agent loop must **not** branch on provider. Vendor quirks stay in `llmProvider.js`:
+  - **Ollama:** pass-through to local client (`localhost:11434`)
+  - **Gemini:** `systemInstruction` on `getGenerativeModel()` (not raw string-only via `startChat` — avoids 400 on `system_instruction`); history as `contents` with `functionCall` / `functionResponse`
+  - **Claude:** top-level `system`; `tool_use` / `tool_result` with paired ids
+  - **OpenAI / Grok:** assistant `tool_calls` + `tool` messages with `tool_call_id` (Grok default base `https://api.x.ai/v1`)
+- Config: Prisma `LLMConfig` (`provider`, `modelName`, `apiKey`, `baseUrl`); short cache TTL (~10s); keys masked on GET
+- Use real vendor model ids. Failures log/surface to UI — no invented cross-provider fallback unless configured
 
-Configured in the web UI and consumed by the core-engine:
+### Prisma models (`apps/core-engine/prisma/schema.prisma`)
 
-* **LLM integration**
-  * Providers: `ollama`, `gemini`, `claude`, `openai`, `grok`
-  * Stored in Prisma `LLMConfig` (API keys masked in GET responses)
-  * Failures should surface clearly to logs/UI; do not invent a fallback provider unless one is configured
+SQLite file `apps/core-engine/prisma/data.db` (gitignored). Models: `Config`, `ConversationLog`, `LLMConfig`, `CalendarConfig`, `ContactPolicy`, `PendingApproval`.
 
-* **Calendar & tasks**
-  * Backends: Google, macOS (AppleScript), Windows/Outlook (PowerShell)
-  * Google OAuth redirect: `http://localhost:3001/api/calendar/google-auth/callback`
-  * Secrets: `apps/core-engine/credentials.json`, `token.json` (gitignored) or `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`
+### Engine API surface (`:3001`)
 
-* **Contact policies**
-  * Tone (`auto` \| `formal` \| `casual` \| …), info level (`full` \| `limited` \| `minimal`)
-  * Restricted topics, custom instructions, `requiresApproval`
+- `GET/POST /api/state` — bot on/off + custom context
+- `POST /api/logout` — WA logout + re-init for new QR
+- `GET/POST /api/logs` — conversation logs
+- `GET/POST /api/llm-config`, `GET/POST /api/calendar-config`
+- `GET /api/calendar/google-auth/init|callback` — OAuth redirect `http://localhost:3001/api/calendar/google-auth/callback`
+- `GET/POST/DELETE /api/contact-policies`
+- `GET /api/approvals`, `POST .../approve|reject`
+- `GET /api/debug`, `GET /api/screenshot`
+- Socket.IO `state` events for live UI
 
-* **Approval queue**
-  * `PendingApproval` rows; approve may include an edited draft before WhatsApp send
+### WhatsApp session lifecycle
 
-***
+Session: `apps/core-engine/.wwebjs_auth/` (gitignored). Hard stops leave Chromium locking `userDataDir` → “browser is already running”.
 
-## Data & Prisma
+Engine behavior to preserve when touching init/shutdown:
 
-- Schema: `apps/core-engine/prisma/schema.prisma`
-- Local DB: `apps/core-engine/prisma/data.db` (**gitignored** — do not commit)
-- Models: `Config`, `ConversationLog`, `LLMConfig`, `CalendarConfig`, `ContactPolicy`, `PendingApproval`
-- After `npm install` / wiped `node_modules`, Prisma client must exist:
-
-```bash
-npm run prisma:generate
-# or rely on apps/core-engine postinstall
-npm run db:push   # apply schema to SQLite
-```
-
-If the engine crashes with `@prisma/client did not initialize yet`, run `npm run prisma:generate`.
-
-***
-
-## Core Development Commands
-
-Run from the **repository root** unless noted.
-
-| Task | Command | Description |
-| :--- | :--- | :--- |
-| **Setup** | `npm install` | Install workspace deps; core-engine `postinstall` runs `prisma generate` |
-| **Generate Prisma client** | `npm run prisma:generate` | Regenerate `@prisma/client` after install or schema changes |
-| **Push DB schema** | `npm run db:push` | `prisma db push` for local SQLite |
-| **Run both apps** | `npm run dev` | Concurrently engine (:3001) + web (:3000) |
-| **Engine only** | `npm run dev:engine` | WhatsApp + API (`node --watch-path=src`) |
-| **Web only** | `npm run dev:web` | Next.js control center |
-| **Stop** | `npm run stop` | SIGTERM then kill ports 3000/3001; kill session-bound Chromium |
-| **Restart** | `npm run restart` | `stop` → wait → `dev` |
-| **Auth helper** | `npm run setup:auth` | `apps/core-engine/src/scripts/setup_auth.js` |
-| **Local LLM model** | `ollama pull <model>` | e.g. `ollama pull gemma4:latest` when provider is Ollama |
-
-There is **no** root `lint` / `test` script in the current package.json. Do not assume they exist unless added.
-
-***
-
-## WhatsApp Session Lifecycle (important)
-
-Session dir: `apps/core-engine/.wwebjs_auth/` (gitignored).
-
-Hard stops used to leave Chromium locking `userDataDir`, causing:
-
-> The browser is already running for …/session
-
-Engine behavior now:
-
-- Absolute `LocalAuth` path; Puppeteer signal handlers disabled so the app owns shutdown
-- `SIGINT` / `SIGTERM` / `SIGHUP` → `client.destroy()`, Prisma disconnect, HTTP close
-- Before `initialize()`: kill only processes bound to this session path; remove Chromium `Singleton*` / `DevToolsActivePort` locks
+- Absolute `LocalAuth` path; Puppeteer `handleSIGINT/SIGTERM/SIGHUP: false` so the app owns shutdown
+- Signals → `client.destroy()`, Prisma disconnect, HTTP close
+- Before `initialize()`: kill only processes bound to this session path; remove `Singleton*` / `DevToolsActivePort`
 - One automatic retry on “browser already running”
-- Prefer `npm run stop` or Ctrl+C over `kill -9`
+- Prefer `npm run stop` or Ctrl+C over `kill -9`; do not delete the whole auth folder unless the user wants to re-pair QR
 
-When changing WA init/shutdown, keep this cleanup path intact.
+### Web control center
 
-***
+App Router: `app/page.js` (dashboard), `app/settings/page.js` (LLM/calendar/policies), `app/layout.js`, `app/components/`. No separate API routes — all data from core-engine.
 
-## System Context Notes
+## Commands
 
-* **State:** Bot config, LLM/calendar settings, policies, approvals, and logs live in SQLite via Prisma — not in git.
-* **Secrets:** Never commit `.env*`, `credentials.json`, `token.json`, session folders, or `*.db`.
-* **API boundary:** UI must use core-engine REST/Socket.IO only. Do not call WhatsApp or Prisma from the Next app.
-* **Message filters:** Engine ignores groups, status/broadcast, self messages, empty bodies, and pre-startup timestamps.
-* **Ports:** Web `3000`, engine `3001`. Stop scripts target these ports.
+Run from **repository root**. Workspaces: `apps/core-engine`, `apps/web-control-center`.
 
-***
+| Task | Command |
+| :--- | :--- |
+| Install | `npm install` (core-engine `postinstall` → `prisma generate`) |
+| Prisma client | `npm run prisma:generate` |
+| Apply schema (SQLite) | `npm run db:push` |
+| Both apps | `npm run dev` |
+| Engine only | `npm run dev:engine` → `node --watch-path=src src/server.js` |
+| Web only | `npm run dev:web` → `next dev -p 3000` |
+| Stop | `npm run stop` — SIGTERM then kill ports 3000/3001 + session Chromium |
+| Restart | `npm run restart` |
+| Local Ollama model | `ollama pull <model>` e.g. `ollama pull gemma4:latest` |
 
-## Critical Files
+`npm run setup:auth` is defined in root `package.json` but **`apps/core-engine/src/scripts/setup_auth.js` is missing** — do not rely on it until restored.
+
+There is **no** root (or workspace) `lint`, `test`, `build`, or single-test script. Do not assume them unless added to `package.json`.
+
+After wiped `node_modules`, if the engine crashes with `@prisma/client did not initialize yet`, run `npm run prisma:generate`.
+
+## Agent working rules
+
+1. Prefer root scripts (`npm run dev:engine`, `npm run prisma:generate`, etc.) over ad-hoc paths into workspaces.
+2. Keep approval and policy checks on the **send path** in core-engine — UI-only changes are not enough.
+3. Keep `ollamaAgent.js` provider-agnostic; fix vendor API issues only in `llmProvider.js`.
+4. For WA restart issues, fix lifecycle/locks in `server.js`; do not wipe `.wwebjs_auth` unless re-pairing is requested.
+5. Do not commit runtime artifacts: `.next`, `node_modules`, `.wwebjs_auth`, `*.db`, `.env*`, `credentials.json`, `token.json`.
+6. Google OAuth secrets: `apps/core-engine/credentials.json` + `token.json`, or `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`.
+7. Chrome path: Puppeteer uses `PUPPETEER_EXECUTABLE_PATH` or macOS `/Applications/Google Chrome.app/...` when present.
+
+## Critical files
 
 | Path | Why |
 | :--- | :--- |
-| `apps/core-engine/src/server.js` | WA client lifecycle, HTTP routes, Socket.IO, shutdown |
+| `apps/core-engine/src/server.js` | WA lifecycle, routes, Socket.IO, shutdown |
 | `apps/core-engine/prisma/schema.prisma` | Data model |
-| `apps/core-engine/src/services/llmProvider.js` | LLM providers |
+| `apps/core-engine/src/services/llmProvider.js` | Provider adapters |
 | `apps/core-engine/src/services/ollamaAgent.js` | Message/agent loop |
 | `apps/core-engine/src/services/contactPolicy.js` | Policies + approvals |
 | `apps/core-engine/src/services/calendarProvider.js` | Calendar/tasks backends |
-| `apps/core-engine/src/services/googleOauth.js` | Google OAuth |
-| `apps/web-control-center/app/page.js` | Main dashboard |
-| `apps/web-control-center/app/settings/page.js` | Operator settings UI |
+| `apps/web-control-center/app/page.js` | Dashboard |
+| `apps/web-control-center/app/settings/page.js` | Operator settings |
 | `package.json` | Workspace scripts |
-| `.gitignore` | Sessions, secrets, DB, build artifacts |
-| `README.md` | Human setup guide |
+| `README.md` | Human setup |
 | `project summary.md` | Architecture / flow reference |
+| `CLAUDE.md` | Claude Code entrypoint; defers here for architecture/commands |
 
-***
+## Related docs
 
-## Agent Working Rules
-
-1. Prefer root scripts (`npm run dev:engine`, `npm run prisma:generate`) over ad-hoc paths.
-2. After dependency reinstalls, ensure Prisma client is generated before running the engine.
-3. Do not commit runtime artifacts (`.next`, `node_modules`, `.wwebjs_auth`, `data.db`, OAuth tokens).
-4. Keep approval and policy checks on the send path — UI changes alone are not sufficient.
-5. For WhatsApp restart issues, fix lifecycle/locks in `server.js`; do not delete the whole auth folder unless the user explicitly wants to re-pair QR.
+- This file (`AGENTS.md`) — **single source of truth** for architecture and dev commands (agents)
+- `README.md` — human setup, LLM provider table, Google OAuth steps
+- `project summary.md` — domain model and operational flow detail
+- `CLAUDE.md` — thin Claude Code pointer; do not duplicate architecture here

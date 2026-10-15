@@ -53,20 +53,80 @@ export async function getUpcomingSchedule() {
     }
 }
 
+// ── Note write guardrails (dedupe / anti-loop) ─────────────────────────────────
+// LLMs sometimes call recordUserNote repeatedly for the same inbound message.
+// Cache successful (and skipped) fingerprints briefly so backends are not spammed.
+const recentNoteWrites = new Map(); // fingerprint → { at, result }
+const NOTE_DEDUPE_TTL_MS = 15 * 60 * 1000; // 15 minutes
+const NOTE_DEDUPE_MAX_ENTRIES = 500;
+
+function normalizeNoteText(value) {
+    return String(value ?? '')
+        .trim()
+        .toLowerCase()
+        .replace(/\s+/g, ' ')
+        .slice(0, 400);
+}
+
+function noteFingerprint(args = {}) {
+    const sender = String(args.senderId || args.senderName || 'unknown').trim().toLowerCase();
+    const type = String(args.noteType || 'GENERAL_NOTE').trim().toUpperCase();
+    const summary = normalizeNoteText(args.messageSummary || args.summary || '');
+    return `${sender}|${type}|${summary}`;
+}
+
+function pruneRecentNoteWrites(now = Date.now()) {
+    for (const [key, entry] of recentNoteWrites) {
+        if (!entry || now - entry.at > NOTE_DEDUPE_TTL_MS) recentNoteWrites.delete(key);
+    }
+    // Bound memory if traffic is high
+    if (recentNoteWrites.size > NOTE_DEDUPE_MAX_ENTRIES) {
+        const overflow = recentNoteWrites.size - NOTE_DEDUPE_MAX_ENTRIES;
+        const keys = recentNoteWrites.keys();
+        for (let i = 0; i < overflow; i++) {
+            const next = keys.next();
+            if (next.done) break;
+            recentNoteWrites.delete(next.value);
+        }
+    }
+}
+
 export async function recordUserNote(args) {
     const config = await getCalendarConfig();
     console.log(`📌 [Tasks] Provider: ${config.tasksProvider}`);
 
+    const now = Date.now();
+    pruneRecentNoteWrites(now);
+    const fingerprint = noteFingerprint(args);
+    const prior = recentNoteWrites.get(fingerprint);
+    if (prior && now - prior.at <= NOTE_DEDUPE_TTL_MS) {
+        console.log(`📌 [Tasks] Dedupe hit — skipping duplicate note (${fingerprint.slice(0, 80)}…)`);
+        return (
+            'NOTE_ALREADY_RECORDED: An identical note from this sender was already saved recently. ' +
+            'Do NOT call recordUserNote again for this message. Continue with a normal user reply. ' +
+            `Prior result: ${prior.result}`
+        );
+    }
+
+    let result;
     switch (config.tasksProvider) {
         case 'google':
-            return googleTasks(args);
+            result = await googleTasks(args);
+            break;
         case 'macos':
-            return macOSReminder(args);
+            result = await macOSReminder(args);
+            break;
         case 'windows':
-            return windowsTask(args);
+            result = await windowsTask(args);
+            break;
         default:
-            return googleTasks(args);
+            result = await googleTasks(args);
     }
+
+    // Cache both success and soft failures so retries in the same loop don't multi-write.
+    // Hard provider errors that start with ERROR: still get cached briefly to stop thrashing.
+    recentNoteWrites.set(fingerprint, { at: now, result: typeof result === 'string' ? result : JSON.stringify(result) });
+    return result;
 }
 
 // ── macOS Calendar (via AppleScript) ──────────────────────────────────────────
