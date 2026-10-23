@@ -11,9 +11,7 @@ import { Ollama } from 'ollama';
 import { GoogleGenerativeAI } from '@google/generative-ai';
 import Anthropic from '@anthropic-ai/sdk';
 import OpenAI from 'openai';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db.js';
 
 // ── Cached config ──────────────────────────────────────────────────────────────
 let _cachedConfig = null;

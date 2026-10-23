@@ -1,9 +1,7 @@
 import { llmChat } from './llmProvider.js';
 import { getUpcomingSchedule, recordUserNote } from './calendarProvider.js';
 import { getContactPolicy, buildPolicyPromptOverlay, createPendingApproval, markApprovalSent } from './contactPolicy.js';
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db.js';
 const conversationContext = new Map();
 
 // ── Approval dispatch registry ─────────────────────────────────────────────────

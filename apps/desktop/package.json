@@ -1,0 +1,141 @@
+{
+  "name": "wa-assistant-desktop",
+  "productName": "WA Assistant Suite",
+  "version": "1.0.0",
+  "private": true,
+  "description": "WhatsApp AI Assistant — desktop shell (macOS + Windows)",
+  "main": "main.mjs",
+  "type": "module",
+  "scripts": {
+    "dev": "node ./run-dev.mjs",
+    "start": "node ./run-dev.mjs",
+    "pack": "electron-builder --dir",
+    "dist": "electron-builder",
+    "dist:mac": "electron-builder --mac",
+    "dist:win": "electron-builder --win",
+    "dist:mac:dir": "electron-builder --mac dir --arm64",
+    "dist:mac:unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip --arm64"
+  },
+  "devDependencies": {
+    "electron": "^33.2.0",
+    "electron-builder": "^25.1.8"
+  },
+  "build": {
+    "appId": "dev.waassistant.suite",
+    "productName": "WA Assistant Suite",
+    "copyright": "Copyright © WA Assistant Suite",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "main.mjs",
+      "preload.cjs",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../web-control-center/out",
+        "to": "ui",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "../core-engine",
+        "to": "core-engine",
+        "filter": [
+          "src/**/*",
+          "prisma/schema.prisma",
+          "package.json",
+          ".env"
+        ]
+      },
+      {
+        "from": "../../version.json",
+        "to": "version.json"
+      }
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/node_modules/@prisma/**/*",
+      "**/node_modules/.prisma/**/*",
+      "**/node_modules/prisma/**/*"
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "icon": "build/icon.icns",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "arm64"
+          ]
+        }
+      ],
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "extendInfo": {
+        "NSAppleEventsUsageDescription": "WA Assistant Suite uses Automation to read macOS Calendar and create Reminders when those providers are selected.",
+        "NSCalendarsUsageDescription": "Calendar access is used when the macOS calendar provider is enabled.",
+        "NSRemindersUsageDescription": "Reminders access is used when the macOS tasks provider is enabled.",
+        "CFBundleDisplayName": "WA Assistant Suite",
+        "CFBundleName": "WA Assistant Suite",
+        "LSApplicationCategoryType": "public.app-category.productivity",
+        "CFBundleIdentifier": "dev.waassistant.suite"
+      },
+      "identity": null
+    },
+    "win": {
+      "icon": "build/icon.png",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Office"
+    },
+    "icon": "build/icon.png",
+    "dmg": {
+      "title": "WA Assistant Suite ${version}",
+      "contents": [
+        {
+          "x": 130,
+          "y": 220
+        },
+        {
+          "x": 410,
+          "y": 220,
+          "type": "link",
+          "path": "/Applications"
+        }
+      ]
+    }
+  }
+}

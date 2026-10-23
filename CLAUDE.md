@@ -4,19 +4,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Source of truth
 
-**`AGENTS.md` is the single source of truth** for project architecture, message flow, LLM provider contract, Prisma models, API surface, WhatsApp session lifecycle, development commands, agent working rules, and critical files.
+**`AGENTS.md` is the single source of truth** for architecture, message flow, LLM contract, Prisma, APIs, WhatsApp lifecycle (including re-pair), desktop/Electron notes, commands, and critical files.
 
-Do not duplicate or diverge from that content here. When architecture or scripts change, update `AGENTS.md` only (and keep this pointer accurate).
+Do not duplicate that content here. When the product changes, update **`AGENTS.md` only**.
 
 Also useful:
 
-- `README.md` — human setup, LLM provider table, Google OAuth
-- `project summary.md` — domain model and operational flow detail
+- `README.md` — human setup, LLM table, OAuth, desktop run
+- `project summary.md` — technical flow / API overview
 
 ## Claude Code notes
 
-- Prefer root scripts from `AGENTS.md` (`npm run dev`, `dev:engine`, `prisma:generate`, etc.) over ad-hoc workspace paths.
-- Keep `ollamaAgent.js` provider-agnostic; vendor wire-format fixes belong only in `llmProvider.js`.
-- Approval/policy enforcement must stay on the core-engine send path — UI-only changes are insufficient.
-- There is no root `lint` / `test` / `build` script unless added to `package.json`.
-- `npm run setup:auth` is wired in root `package.json` but the target script file is missing — ignore it until restored.
+- Prefer root scripts (`npm run dev`, `dev:engine`, `dev:desktop:fast`, `prisma:generate`, `build:ui`).
+- Keep `ollamaAgent.js` provider-agnostic; vendor fixes only in `llmProvider.js`.
+- Approval/policy enforcement stays on the core-engine send path.
+- Desktop dev must use stock Electron via `run-dev.mjs` — do not rename/copy `Electron.app` (breaks ICU/GPU).
+- Unlink/re-pair must clear LocalAuth; UI `READY` only means truly linked.
+- No root `lint` / `test` unless added to `package.json`.
+- `npm run setup:auth` target script is missing — ignore until restored.

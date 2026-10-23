@@ -4,12 +4,10 @@
  * Providers: google | macos | windows
  */
 
-import { PrismaClient } from '@prisma/client';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { prisma } from '../db.js';
 import { getUpcomingSchedule as googleCalendar, recordUserNote as googleTasks } from './google.js';
-
-const prisma = new PrismaClient();
 const execAsync = promisify(exec);
 
 // ── Cached config ──────────────────────────────────────────────────────────────

@@ -1,148 +1,137 @@
 # WhatsApp AI Assistant Suite — Project Summary
 
-Technical overview of the current codebase. The suite receives WhatsApp messages, applies contact policies, generates LLM drafts (multi-provider), optionally queues them for human approval, and can use calendar/task tools for context-aware replies.
+Technical overview of the current codebase (aligned with `AGENTS.md`).
+
+Product version: root **`version.json`** (1.0.0, channel stable, productId `dev.waassistant.suite`).
 
 ## Architecture
 
-npm workspaces monorepo with two runtime apps:
+npm workspaces monorepo with three apps:
 
 ### 1. Core Engine — `apps/core-engine`
 
-- **HTTP + Socket.IO** on port **3001**
-- **WhatsApp** via `whatsapp-web.js` + Puppeteer (system Chrome when available)
-- **Prisma + SQLite** for config, logs, policies, approvals (`prisma/schema.prisma`, local `data.db`)
-- **Orchestration** of LLM, calendar/tasks, contact policy, and outbound sends
-
-Key entrypoint: `src/server.js`
-
-Key services:
+- HTTP + Socket.IO (default **:3001**)
+- WhatsApp via `whatsapp-web.js` + Puppeteer (system Chrome; `headless: 'new'`)
+- Prisma/SQLite for config, logs, policies, approvals
+- Embed API: `startEngine` / `stopEngine` for desktop
+- Portable paths (`paths.js`), shared DB (`db.js`), version meta (`appMeta.js`)
 
 | Module | Responsibility |
 | :--- | :--- |
-| `services/ollamaAgent.js` | Incoming message pipeline, tools, reply dispatch (**provider-agnostic**) |
-| `services/llmProvider.js` | Unified `llmChat` over Ollama / Gemini / Claude / OpenAI / Grok; **vendor adapters** map messages/tools to each API |
-| `services/calendarProvider.js` | Calendar read + task write (Google / macOS / Windows) |
-| `services/contactPolicy.js` | Per-contact rules + pending approval CRUD |
-| `services/google.js` | Google Calendar/Tasks API calls |
-| `services/googleOauth.js` | OAuth URL + callback + token persistence |
+| `server.js` | WA lifecycle, re-pair, routes, static UI mount, watchdog |
+| `services/ollamaAgent.js` | Incoming pipeline / tools / dispatch (provider-agnostic) |
+| `services/llmProvider.js` | Multi-provider chat + vendor wire formats |
+| `services/calendarProvider.js` | Calendar/tasks backends |
+| `services/contactPolicy.js` | Policies + approval CRUD |
+| `services/google.js` / `googleOauth.js` | Google APIs + OAuth |
 
 ### 2. Web Control Center — `apps/web-control-center`
 
-- Next.js UI on port **3000**
-- Live bot state (connection, QR, user) over Socket.IO / REST
-- Settings for LLM, calendar, contact policies
-- Conversation logs and approval queue
+- Next.js App Router; static export for desktop (`output: 'export'`)
+- Browser dev on **:3000**; desktop loads engine-served `out/`
+- Native-style shell: sidebar (`AppShell`), version chrome (`AppChrome`)
+- macOS graphite dark theme + system accents
+- Settings: LLM, Calendar, Contacts, Approvals, System & Updates
+- Configurable API base (`lib/apiBase.js`)
 
-Primary UI paths: `app/page.js`, `app/settings/page.js`
+### 3. Desktop — `apps/desktop`
 
-### 3. Shared / tooling
+- Electron main embeds core-engine with OS `userData`
+- Dev: `run-dev.mjs` launches **stock** Electron (stable); menu may say “Electron”
+- Prod naming via electron-builder `productName` / CFBundleName
+- Icons: `build/icon.icns`, entitlements template for future signing
+- Packaging note: full DMG still needs engine dependency staging for offline runs
 
-- Root `package.json` scripts coordinate both apps (`dev`, `stop`, `restart`, `db:push`, `prisma:generate`)
-- `packages/` reserved for shared non-UI logic as the suite grows
+### 4. Shared
+
+- Root scripts: `dev`, `stop`, `desktop`, `build:ui`, Prisma
+- `packages/` reserved
 
 ## Domain model (Prisma)
 
 | Model | Purpose |
 | :--- | :--- |
-| `Config` | Global bot on/off + custom context string |
-| `ConversationLog` | Audited message/response history |
-| `LLMConfig` | Provider, model, API key, optional base URL |
-| `CalendarConfig` | Calendar + tasks backend selection |
-| `ContactPolicy` | Tone, info level, restricted topics, require-approval, custom instructions |
-| `PendingApproval` | Human review queue (pending / approved / rejected / sent) |
+| `Config` | Bot on/off + custom context |
+| `ConversationLog` | Message/response audit |
+| `LLMConfig` | Provider, model, key, baseUrl |
+| `CalendarConfig` | Calendar + tasks backend |
+| `ContactPolicy` | Tone, info level, topics, approval, instructions |
+| `PendingApproval` | pending / approved / rejected / sent |
 
-Runtime DB file is local-only and gitignored. Schema is source-controlled; use `npm run db:push` after schema changes and `npm run prisma:generate` after installs.
+Runtime DB is gitignored. Schema uses `env("DATABASE_URL")`.
 
 ## Operational flow
 
-1. **Connect** — Engine initializes WhatsApp Web (clears stale Chromium session locks first). UI shows QR or READY.
-2. **Receive** — `message_create` filters groups/status/self; forwards DMs to the agent.
-3. **Govern** — Contact policy applies tone/info limits; may force approval instead of auto-send.
-4. **Decide** — `ollamaAgent` calls `llmChat` with Ollama-style `messages`/`tools`; `llmProvider` routes to the configured vendor and normalizes the reply (including multi-turn tool calls). Tools may read calendar or create tasks/notes.
-5. **Approve (optional)** — Draft lands in `PendingApproval`; owner approves/edits/rejects in the UI.
-6. **Respond** — Engine sends via the WhatsApp client and writes a conversation log.
-7. **Observe** — Dashboard streams `botState` and exposes logs/settings APIs.
+1. **Connect** — clear locks → initialize WA → QR or READY (watchdog + state poll)
+2. **Receive** — filter non-DM noise → agent
+3. **Govern** — contact policy
+4. **Decide** — `llmChat` + optional tools
+5. **Approve** — optional queue
+6. **Send + log**
+7. **Observe** — dashboard Socket.IO + REST
 
-## LLM provider layer
+### Re-pair / logout
 
-`llmProvider.js` is the single switch-point when Settings change provider/model/key.
+`POST /api/logout`: stop watchdog → logout → destroy client → **delete LocalAuth directory** → new client → initialize → wait for **new QR**. Spurious `authenticated` before QR is ignored. UI treats only `READY` as connected.
+
+## LLM layer
 
 | Concern | Behavior |
 | :--- | :--- |
-| **Unified contract** | In: `{ messages, tools }`. Out: `{ message: { content, tool_calls? } }` (same shape the agent already used for Ollama). |
-| **Config** | Prisma `LLMConfig` (`provider`, `modelName`, `apiKey`, `baseUrl`); short in-memory cache; keys masked on GET. |
-| **Ollama** | Local client pass-through (`http://localhost:11434`). |
-| **Gemini** | `@google/generative-ai`. `systemInstruction` set on `getGenerativeModel()` so it is formatted as `Content` (avoids 400 `Invalid value at 'system_instruction'` if a raw string is only passed via `startChat`). Chat history sent as `contents`; tool turns use `functionCall` / `functionResponse`. |
-| **Claude** | Anthropic Messages API: top-level `system`, tools as `tool_use` / `tool_result` with paired ids. |
-| **OpenAI / Grok** | Chat Completions-compatible: assistant `tool_calls` + tool messages with matching `tool_call_id`. Grok defaults to `https://api.x.ai/v1`. |
-| **Failures** | Logged and surfaced; no automatic cross-provider fallback unless configured. |
-
-Example model ids: Ollama `gemma4:latest`; Gemini `gemini-2.0-flash` / `gemini-1.5-flash`; Claude/OpenAI/Grok per vendor catalog. Invalid model names fail at the vendor API after the request body is otherwise valid.
+| Contract | `{ messages, tools }` → `{ message: { content, tool_calls? } }` |
+| Config | Prisma `LLMConfig`; short cache; keys masked |
+| Ollama / Gemini / Claude / OpenAI / Grok | Adapters in `llmProvider.js` only |
+| Failures | Surface; no auto cross-provider fallback |
 
 ## WhatsApp process lifecycle
 
-Problem addressed: stopping/restarting the engine left Chromium holding `.wwebjs_auth/session`, causing:
-
-> The browser is already running for …/session. Use a different `userDataDir` or stop the running browser first.
-
-Current behavior:
-
-- Absolute `LocalAuth` path under `apps/core-engine/.wwebjs_auth`
-- Puppeteer `handleSIGINT/SIGTERM/SIGHUP: false` so the app owns shutdown
-- On `SIGINT`/`SIGTERM`/`SIGHUP`: `client.destroy()`, Prisma disconnect, HTTP close
-- Before `initialize()`: kill only processes tied to this session dir; remove `SingletonLock` / `SingletonSocket` / `SingletonCookie` / `DevToolsActivePort`
-- One automatic retry if init still reports an in-use `userDataDir`
-- Root `npm run stop` sends SIGTERM first, then force-kills ports 3000/3001 and session-bound browsers
+- Absolute LocalAuth under active data dir
+- Puppeteer app-owned signals
+- Shutdown: destroy + Prisma disconnect + HTTP close
+- Lock cleanup + one retry on “browser already running”
+- Root `npm run stop` clears ports 3000/3001 and session-bound Chromium
 
 ## Integrations
 
 | Integration | Notes |
 | :--- | :--- |
-| **LLM** | Ollama (local default), Gemini, Claude, OpenAI, Grok — keys in DB, masked in API responses; vendor translation in `llmProvider.js` |
-| **Google Calendar/Tasks** | OAuth web client; redirect `http://localhost:3001/api/calendar/google-auth/callback`; `credentials.json` / `token.json` gitignored |
-| **macOS** | Calendar + Reminders via AppleScript when selected |
-| **Windows** | Outlook calendar/tasks via PowerShell when selected |
+| LLM | Ollama default; cloud keys in DB |
+| Google | OAuth redirect `http://localhost:3001/api/calendar/google-auth/callback` |
+| macOS | Calendar + Reminders (AppleScript) |
+| Windows | Outlook (PowerShell) |
 
 ## API surface (engine)
 
-Representative routes (all on `:3001`):
+- `GET/POST /api/state`, `POST /api/logout`
+- Logs, LLM/calendar config, Google OAuth
+- Contact policies, approvals
+- `GET /api/system` — version, paths, durability, upgrade history
+- Debug / screenshot
+- Socket.IO `state`, `live_log`, `approval_request`
+- Optional static UI (`/`, `/settings/`)
 
-- `GET/POST /api/state` — bot status + custom context
-- `POST /api/logout` — WhatsApp logout + re-init for new QR
-- `GET/POST /api/logs` — conversation log read/write
-- `GET/POST /api/llm-config` — LLM settings
-- `GET/POST /api/calendar-config` — calendar/tasks settings
-- `GET /api/calendar/google-auth/init|callback` — Google OAuth
-- `GET/POST/DELETE /api/contact-policies` — policy CRUD
-- `GET /api/approvals`, `POST .../approve|reject` — approval queue
-- `GET /api/debug`, `GET /api/screenshot` — diagnostics
-- Socket.IO `state` events for live UI updates
-
-## Dev commands (root)
+## Dev commands
 
 ```bash
-npm install
-npm run prisma:generate
-npm run db:push
-npm run dev          # engine + web
-npm run stop         # clean shutdown helpers
-npm run restart
+npm install && npm run prisma:generate && npm run db:push
+npm run dev                 # browser stack
+npm run build:ui && npm run dev:desktop:fast
+npm run stop && npm run restart
 ```
 
 ## Source of truth files
 
-- `apps/core-engine/src/server.js` — WA client lifecycle, HTTP, Socket.IO
-- `apps/core-engine/prisma/schema.prisma` — data model
-- `apps/core-engine/src/services/llmProvider.js` — multi-provider LLM adapters
-- `apps/core-engine/src/services/ollamaAgent.js` — message/agent loop
-- `apps/core-engine/src/services/*` — other domain services
-- `apps/web-control-center/app/settings/page.js` — operator configuration UI
-- `package.json` — workspace scripts
-- `.gitignore` — sessions, secrets, DB, build artifacts excluded from git
+- `apps/core-engine/src/server.js` — WA + HTTP + embed
+- `apps/core-engine/src/paths.js`, `db.js`, `appMeta.js`
+- `apps/core-engine/prisma/schema.prisma`
+- `apps/core-engine/src/services/*`
+- `apps/web-control-center/app/{page.js,settings/page.js,components/*,globals.css}`
+- `apps/desktop/{main.mjs,run-dev.mjs,preload.cjs,package.json,build/}`
+- `version.json`, root `package.json`, `.gitignore`
 
 ### Docs
 
-- `AGENTS.md` — **single source of truth** for agent-oriented architecture and commands
-- `README.md` — human setup and configuration
-- `project summary.md` (this file) — technical overview; keep aligned with code and `AGENTS.md`
-- `CLAUDE.md` — Claude Code pointer only; defers to `AGENTS.md`
+- `AGENTS.md` — single source of truth for agents
+- `README.md` — human setup
+- `project summary.md` (this file) — technical overview
+- `CLAUDE.md` — thin pointer to AGENTS

@@ -65,3 +65,9 @@ memory/
 
 # Optional local lockfiles inside workspaces (root package-lock.json is kept)
 apps/*/package-lock.json
+
+# Desktop build artifacts
+apps/desktop/release/
+apps/desktop/dist/
+apps/web-control-center/out/
+apps/desktop/.runtime/

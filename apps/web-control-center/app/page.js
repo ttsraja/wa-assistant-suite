@@ -8,7 +8,10 @@ import {
     IconZap, IconDatabase, IconCheckSquare, IconCpu, IconShield
 } from "./components/icons";
 
-const API = "http://localhost:3001";
+import { getApiBase } from "./lib/apiBase";
+import { AppFooter } from "./components/AppChrome";
+import AppShell from "./components/AppShell";
+
 
 const LLM_LABELS = {
     ollama: "Ollama (Local)",
@@ -54,10 +57,10 @@ export default function Dashboard() {
     const fetchOverview = useCallback(async () => {
         try {
             const [llm, cal, policyList, approvals] = await Promise.all([
-                fetch(`${API}/api/llm-config`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-                fetch(`${API}/api/calendar-config`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
-                fetch(`${API}/api/contact-policies`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
-                fetch(`${API}/api/approvals?status=pending`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+                fetch(`${getApiBase()}/api/llm-config`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+                fetch(`${getApiBase()}/api/calendar-config`).then((r) => (r.ok ? r.json() : null)).catch(() => null),
+                fetch(`${getApiBase()}/api/contact-policies`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
+                fetch(`${getApiBase()}/api/approvals?status=pending`).then((r) => (r.ok ? r.json() : [])).catch(() => []),
             ]);
             if (llm) setLlmConfig(llm);
             if (cal) setCalendarConfig(cal);
@@ -117,7 +120,7 @@ export default function Dashboard() {
 
         const fetchLogs = async () => {
             try {
-                const res = await fetch(`${API}/api/logs?limit=100&offset=` + logOffset);
+                const res = await fetch(`${getApiBase()}/api/logs?limit=100&offset=` + logOffset);
                 if (!res.ok) throw new Error(`HTTP ${res.status}`);
                 const pastLogs = await res.json();
                 const formatted = (pastLogs || []).flatMap((l) => [
@@ -143,7 +146,7 @@ export default function Dashboard() {
             } catch (e) {
                 console.error("Error fetching logs:", e);
                 if (isMounted) {
-                    fetch(`${API}/api/logs`)
+                    fetch(`${getApiBase()}/api/logs`)
                         .then((res) => res.json())
                         .then((pastLogs) => setLogs(formattedFromDB(pastLogs || [])))
                         .catch(() => {});
@@ -151,10 +154,27 @@ export default function Dashboard() {
             }
         };
 
+        const fetchState = async () => {
+            try {
+                const res = await fetch(`${getApiBase()}/api/state`);
+                if (!res.ok) return;
+                const data = await res.json();
+                if (isMounted) {
+                    setState((prev) => ({ ...prev, ...data }));
+                    if (data.customContext !== undefined) setContextInput(data.customContext);
+                    setEngineOnline(true);
+                }
+            } catch {
+                if (isMounted) setEngineOnline(false);
+            }
+        };
+
         fetchLogs();
         fetchOverview();
+        fetchState();
+        const statePoll = setInterval(fetchState, 2500);
 
-        const socket = io(API, {
+        const socket = io(getApiBase(), {
             reconnectionAttempts: Infinity,
             timeout: 10000,
             reconnectInterval: 5000,
@@ -215,6 +235,7 @@ export default function Dashboard() {
         return () => {
             isMounted = false;
             clearInterval(overviewTimer);
+            clearInterval(statePoll);
             socket.off("live_log");
             socket.off("approval_request");
             socket.disconnect();
@@ -224,7 +245,7 @@ export default function Dashboard() {
     const updateState = async (updates) => {
         setIsSaving(true);
         try {
-            const res = await fetch(`${API}/api/state`, {
+            const res = await fetch(`${getApiBase()}/api/state`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(updates),
@@ -243,17 +264,60 @@ export default function Dashboard() {
     };
 
     const handleLogout = async () => {
-        if (!confirm("Are you sure you want to disconnect WhatsApp and regenerate QR code?")) return;
+        if (!confirm("Unlink this WhatsApp session and show a new QR code? You will need to scan again from your phone.")) return;
+        // Optimistic UI — clear any stale "connected" identity immediately
+        setState((prev) => ({
+            ...prev,
+            connectionStatus: "INITIALIZING",
+            qrCode: null,
+            user: null,
+            phoneNumber: null,
+            platform: null,
+            loadingProgress: null,
+            error: null,
+            waClientState: null,
+        }));
         try {
-            await fetch(`${API}/api/logout`, { method: "POST" });
+            await fetch(`${getApiBase()}/api/logout`, { method: "POST" });
         } catch (e) {
             console.error(e);
+            setState((prev) => ({
+                ...prev,
+                connectionStatus: "ERROR",
+                error: e.message || "Failed to start re-pair",
+            }));
         }
     };
 
-    const isConnected = state.connectionStatus === "READY" || !!state.user;
-    const isLoading = state.connectionStatus === "LOADING";
-    const needsScan = (state.connectionStatus === "SCAN_QR" || !!state.qrCode) && !isConnected;
+    const status = state.connectionStatus || "INITIALIZING";
+    // Only READY means fully linked — never treat leftover user + AUTHENTICATED as connected
+    const isConnected = status === "READY";
+    const isLoading = status === "LOADING" || status === "AUTHENTICATED";
+    const needsScan = status === "SCAN_QR" || (!!state.qrCode && status !== "READY" && status !== "AUTHENTICATED" && status !== "LOADING");
+    const isError = status === "ERROR" || status === "AUTH_FAILURE" || status === "DISCONNECTED";
+    const isInitializing = !isConnected && !isLoading && !needsScan && !isError;
+
+    const statusTone = isConnected ? "ready" : isLoading ? "loading" : needsScan ? "scan_qr" : isError ? "disconnected" : "loading";
+    const statusHeading = isConnected
+        ? `Connected as ${state.user || "WhatsApp User"}`
+        : isLoading
+            ? (status === "AUTHENTICATED"
+                ? "Authenticated — finishing WhatsApp setup…"
+                : `Syncing with WhatsApp (${state.loadingProgress ?? "…"}%)`)
+            : needsScan
+                ? "Action required: Link WhatsApp"
+                : isError
+                    ? (status === "AUTH_FAILURE" ? "Authentication failed" : status === "DISCONNECTED" ? "WhatsApp disconnected" : "Connection error")
+                    : "WhatsApp engine starting…";
+    const statusMeta = isConnected
+        ? null
+        : isLoading
+            ? (state.waClientState ? `Client state: ${state.waClientState}` : "Keep this window open while WhatsApp Web finishes loading.")
+            : needsScan
+                ? "Phone → Linked devices → Link a device → scan the QR code"
+                : isError
+                    ? (state.error || "Check engine logs, Chrome installation, or try Unlink / Restart.")
+                    : "Launching Chromium session for WhatsApp Web…";
 
     const llmProviderLabel = LLM_LABELS[llmConfig?.provider] || llmConfig?.provider || "Not loaded";
     const llmModel = llmConfig?.modelName || "—";
@@ -262,60 +326,35 @@ export default function Dashboard() {
     const googleAuth = calendarConfig?.authStatus?.google || "—";
 
     return (
-        <div className="app-container">
-            <header className="dashboard-header">
-                <div className="brand-wrapper">
-                    <div className="brand-logo-glow">
-                        <IconMessage />
-                    </div>
-                    <div>
-                        <h1 className="brand-title">WhatsApp AI Assistant Suite</h1>
-                        <p className="brand-subtitle">Control Center · Multi-provider LLM · Calendar · Policies</p>
-                    </div>
-                </div>
+        <AppShell
+            active="dashboard"
+            title="Dashboard"
+            subtitle="Live connection · policies · conversation feed"
+            engineOnline={engineOnline}
+            topRight={<ThemeToggle />}
+        >
+            <div className="mac-page-body">
 
-                <div className="header-actions">
-                    <span className={`badge ${engineOnline ? "badge-emerald" : "badge-rose"}`}>
-                        <span className={`status-indicator-dot ${engineOnline ? "ready" : "disconnected"}`} style={{ width: 8, height: 8 }} />
-                        <IconServer width={14} height={14} />
-                        {engineOnline ? "Engine Online :3001" : "Engine Disconnected"}
-                    </span>
-                    <ThemeToggle />
-                    <a href="/settings" className="nav-link">
-                        <IconSettings width={15} height={15} />
-                        Settings
-                    </a>
-                </div>
-            </header>
-
-            <div className={`status-banner ${isConnected ? "ready" : isLoading ? "loading" : needsScan ? "scan_qr" : "disconnected"}`}>
+            <div className={`status-banner ${statusTone}`}>
                 <div className="status-left">
-                    <div className={`status-indicator-dot ${isConnected ? "ready" : isLoading ? "loading" : needsScan ? "scan_qr" : "disconnected"}`} />
+                    <div className={`status-indicator-dot ${statusTone}`} />
                     <div>
-                        <div className="status-heading">
-                            {isConnected && `Connected as ${state.user || "WhatsApp User"}`}
-                            {isLoading && `Syncing with WhatsApp (${state.loadingProgress || 99}%)`}
-                            {needsScan && "Action Required: Link WhatsApp Account"}
-                            {!isConnected && !isLoading && !needsScan && "WhatsApp Engine Initializing..."}
-                        </div>
+                        <div className="status-heading">{statusHeading}</div>
                         <div className="status-meta">
-                            {isConnected && (
+                            {isConnected ? (
                                 <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                                     <IconPhone width={14} height={14} />
                                     {state.phoneNumber ? `+${state.phoneNumber}` : "Linked"} · Device: {state.platform || "Mobile"} · Auto-reply {state.status === "ON" ? "active" : "paused"}
                                 </span>
-                            )}
-                            {isLoading && "Finalizing handshake with WhatsApp Web. Ready in a few seconds..."}
-                            {needsScan && "Open WhatsApp on your phone > Linked Devices > Link a Device > Scan QR"}
-                            {!isConnected && !isLoading && !needsScan && "Starting headless Chromium instance..."}
+                            ) : statusMeta}
                         </div>
                     </div>
                 </div>
 
-                <div>
-                    {isConnected && (
-                        <button onClick={handleLogout} className="btn-secondary" title="Disconnect and scan a different number">
-                            Unlink / Re-pair
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                    {(isConnected || status === "AUTHENTICATED" || status === "LOADING" || needsScan) && (
+                        <button onClick={handleLogout} className="btn-secondary" title="Clear session and show a new QR code">
+                            {needsScan ? "Refresh QR" : "Unlink / Re-pair"}
                         </button>
                     )}
                 </div>
@@ -570,6 +609,8 @@ export default function Dashboard() {
                     </div>
                 </div>
             </div>
-        </div>
+            </div>
+            <AppFooter />
+        </AppShell>
     );
 }

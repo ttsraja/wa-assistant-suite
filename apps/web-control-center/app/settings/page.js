@@ -6,7 +6,10 @@ import {
     IconRefresh, IconPlus, IconPencil, IconTrash, IconCheck, IconX, IconKey
 } from "../components/icons";
 
-const API = "http://localhost:3001";
+import { getApiBase } from "../lib/apiBase";
+import { AppFooter, SystemPanel } from "../components/AppChrome";
+import AppShell from "../components/AppShell";
+
 
 const LLM_PROVIDERS = [
     { value: "ollama", label: "Ollama (Local LLM)", needsKey: false, modelPlaceholder: "e.g. gemma4:latest, qwen3:4b, llama3.2" },
@@ -41,6 +44,7 @@ const TABS = [
     { id: "calendar", label: "Calendar & Tasks", Icon: IconCalendar },
     { id: "contacts", label: "Contact Policies", Icon: IconUsers },
     { id: "approvals", label: "Approval Queue", Icon: IconInbox },
+    { id: "system", label: "System & Updates", Icon: IconKey },
 ];
 
 function SectionTitle({ Icon, children }) {
@@ -83,7 +87,7 @@ export default function SettingsPage() {
     const handleGoogleAuth = useCallback(async () => {
         setProcessing("google");
         try {
-            const res = await fetch(`${API}/api/calendar/google-auth/init`);
+            const res = await fetch(`${getApiBase()}/api/calendar/google-auth/init`);
             const data = await res.json();
             if (!res.ok) throw new Error(data.error || "Failed to start auth flow.");
             window.location.assign(data.url);
@@ -93,27 +97,15 @@ export default function SettingsPage() {
         }
     }, []);
 
+    const settingsActive = activeTab === "system" ? "system" : activeTab === "approvals" ? "approvals" : activeTab === "contacts" ? "contacts" : activeTab === "calendar" ? "calendar" : "llm";
     return (
-        <div className="app-container">
-            <header className="dashboard-header">
-                <div className="brand-wrapper">
-                    <div className="brand-logo-glow">
-                        <IconSettings />
-                    </div>
-                    <div>
-                        <h1 className="brand-title">Agent Settings</h1>
-                        <p className="brand-subtitle">LLM · Calendar · Contact Policies · Approvals</p>
-                    </div>
-                </div>
-                <div className="header-actions">
-                    <ThemeToggle />
-                    <a href="/" className="nav-link">
-                        <IconArrowLeft width={15} height={15} />
-                        Dashboard
-                    </a>
-                </div>
-            </header>
-
+        <AppShell
+            active={settingsActive}
+            title="Settings"
+            subtitle="Providers · policies · approvals · system"
+            engineOnline={true}
+            topRight={<ThemeToggle />}
+        >
             <div className="settings-shell">
                 <div className="tab-bar">
                     {TABS.map(({ id, label, Icon }) => (
@@ -135,10 +127,13 @@ export default function SettingsPage() {
                 )}
                 {activeTab === "contacts" && <ContactsTab />}
                 {activeTab === "approvals" && <ApprovalsTab />}
+                {activeTab === "system" && <SystemPanel />}
             </div>
-        </div>
+            <AppFooter />
+        </AppShell>
     );
 }
+
 
 function LLMTab() {
     const [config, setConfig] = useState({ provider: "ollama", modelName: "gemma4:latest", apiKey: "", baseUrl: "" });
@@ -147,7 +142,7 @@ function LLMTab() {
     const [ollamaModels, setOllamaModels] = useState([]);
 
     useEffect(() => {
-        fetch(`${API}/api/llm-config`).then((r) => r.json()).then(setConfig).catch(() => {});
+        fetch(`${getApiBase()}/api/llm-config`).then((r) => r.json()).then(setConfig).catch(() => {});
         fetch("http://localhost:11434/api/tags").then((r) => r.json()).then((d) => {
             setOllamaModels((d.models || []).map((m) => m.name));
         }).catch(() => {});
@@ -159,7 +154,7 @@ function LLMTab() {
         setSaving(true);
         setMsg(null);
         try {
-            const res = await fetch(`${API}/api/llm-config`, {
+            const res = await fetch(`${getApiBase()}/api/llm-config`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(config),
@@ -303,7 +298,7 @@ function CalendarTab({ handleGoogleAuth, processing }) {
     const [msg, setMsg] = useState(null);
 
     useEffect(() => {
-        fetch(`${API}/api/calendar-config`)
+        fetch(`${getApiBase()}/api/calendar-config`)
             .then((r) => r.json())
             .then((data) => setConfig((current) => ({
                 ...current,
@@ -317,7 +312,7 @@ function CalendarTab({ handleGoogleAuth, processing }) {
         setSaving(true);
         setMsg(null);
         try {
-            await fetch(`${API}/api/calendar-config`, {
+            await fetch(`${getApiBase()}/api/calendar-config`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(config),
@@ -425,7 +420,7 @@ function ContactsTab() {
     const [deleting, setDeleting] = useState(null);
 
     const fetchPolicies = useCallback(() => {
-        fetch(`${API}/api/contact-policies`).then((r) => r.json()).then(setPolicies).catch(() => {});
+        fetch(`${getApiBase()}/api/contact-policies`).then((r) => r.json()).then(setPolicies).catch(() => {});
     }, []);
 
     useEffect(() => { fetchPolicies(); }, [fetchPolicies]);
@@ -445,7 +440,7 @@ function ContactsTab() {
                     ? JSON.stringify(editing.restrictedTopics.split(",").map((t) => t.trim()).filter(Boolean))
                     : null,
             };
-            await fetch(`${API}/api/contact-policies`, {
+            await fetch(`${getApiBase()}/api/contact-policies`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify(payload),
@@ -463,7 +458,7 @@ function ContactsTab() {
         if (!confirm("Delete policy for this contact?")) return;
         setDeleting(contactId);
         try {
-            await fetch(`${API}/api/contact-policies/${encodeURIComponent(contactId)}`, { method: "DELETE" });
+            await fetch(`${getApiBase()}/api/contact-policies/${encodeURIComponent(contactId)}`, { method: "DELETE" });
             fetchPolicies();
         } catch {
             alert("Failed to delete.");
@@ -609,7 +604,7 @@ function ApprovalsTab() {
     const [filter, setFilter] = useState("pending");
 
     const fetchApprovals = useCallback(() => {
-        fetch(`${API}/api/approvals?status=${filter}`).then((r) => r.json()).then(setApprovals).catch(() => {});
+        fetch(`${getApiBase()}/api/approvals?status=${filter}`).then((r) => r.json()).then(setApprovals).catch(() => {});
     }, [filter]);
 
     useEffect(() => {
@@ -622,7 +617,7 @@ function ApprovalsTab() {
         setProcessing(approval.id);
         try {
             const editedResponse = editingDraft[approval.id] ?? approval.aiDraft;
-            await fetch(`${API}/api/approvals/${approval.id}/approve`, {
+            await fetch(`${getApiBase()}/api/approvals/${approval.id}/approve`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({ editedResponse }),
@@ -639,7 +634,7 @@ function ApprovalsTab() {
         if (!confirm("Reject this message? No reply will be sent.")) return;
         setProcessing(id);
         try {
-            await fetch(`${API}/api/approvals/${id}/reject`, { method: "POST" });
+            await fetch(`${getApiBase()}/api/approvals/${id}/reject`, { method: "POST" });
             fetchApprovals();
         } catch {
             alert("Failed to reject.");
@@ -729,3 +724,4 @@ function ApprovalsTab() {
         </div>
     );
 }
+

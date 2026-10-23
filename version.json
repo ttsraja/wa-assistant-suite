@@ -1,0 +1,8 @@
+{
+  "name": "WA Assistant Suite",
+  "version": "1.0.0",
+  "schemaVersion": 1,
+  "channel": "stable",
+  "productId": "dev.waassistant.suite",
+  "notes": "Upgrade-safe: user data (SQLite DB, WhatsApp session, OAuth tokens) lives outside the app bundle and is preserved across version upgrades."
+}

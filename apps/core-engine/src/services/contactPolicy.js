@@ -3,9 +3,7 @@
  * Per-contact tone, information level, topic restrictions, and approval workflow.
  */
 
-import { PrismaClient } from '@prisma/client';
-
-const prisma = new PrismaClient();
+import { prisma } from '../db.js';
 
 // ── Cache ──────────────────────────────────────────────────────────────────────
 const _policyCache = new Map(); // contactId → { policy, cachedAt }
