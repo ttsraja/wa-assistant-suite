@@ -9,6 +9,8 @@ import {
 } from "./components/icons";
 
 import { getApiBase } from "./lib/apiBase";
+import { calendarBadgeLabel, calendarBadgeOk, providerReady } from "./lib/calendarStatus";
+import { isWhatsAppConnected, isWhatsAppLoading, needsWhatsAppScan } from "./lib/connectionStatus";
 import { AppFooter } from "./components/AppChrome";
 import AppShell from "./components/AppShell";
 
@@ -291,9 +293,9 @@ export default function Dashboard() {
 
     const status = state.connectionStatus || "INITIALIZING";
     // Only READY means fully linked — never treat leftover user + AUTHENTICATED as connected
-    const isConnected = status === "READY";
-    const isLoading = status === "LOADING" || status === "AUTHENTICATED";
-    const needsScan = status === "SCAN_QR" || (!!state.qrCode && status !== "READY" && status !== "AUTHENTICATED" && status !== "LOADING");
+    const isConnected = isWhatsAppConnected(status);
+    const isLoading = isWhatsAppLoading(status);
+    const needsScan = needsWhatsAppScan(status, state.qrCode);
     const isError = status === "ERROR" || status === "AUTH_FAILURE" || status === "DISCONNECTED";
     const isInitializing = !isConnected && !isLoading && !needsScan && !isError;
 
@@ -321,9 +323,17 @@ export default function Dashboard() {
 
     const llmProviderLabel = LLM_LABELS[llmConfig?.provider] || llmConfig?.provider || "Not loaded";
     const llmModel = llmConfig?.modelName || "—";
-    const calProvider = CAL_LABELS[calendarConfig?.calendarProvider] || calendarConfig?.calendarProvider || "—";
-    const tasksProvider = CAL_LABELS[calendarConfig?.tasksProvider] || calendarConfig?.tasksProvider || "—";
-    const googleAuth = calendarConfig?.authStatus?.google || "—";
+    const calProviderKey = calendarConfig?.calendarProvider || "google";
+    const tasksProviderKey = calendarConfig?.tasksProvider || "google";
+    const calProvider = CAL_LABELS[calProviderKey] || calProviderKey || "—";
+    const tasksProvider = CAL_LABELS[tasksProviderKey] || tasksProviderKey || "—";
+
+    // Badge must reflect *selected* providers, not always Google OAuth.
+    const authStatus = calendarConfig?.authStatus || {};
+    const calReady = providerReady(authStatus, calProviderKey);
+    const tasksReady = providerReady(authStatus, tasksProviderKey);
+    const overviewBadgeOk = calendarBadgeOk(authStatus, calProviderKey, tasksProviderKey);
+    const overviewBadgeLabel = calendarBadgeLabel(authStatus, calProviderKey, tasksProviderKey);
 
     return (
         <AppShell
@@ -374,16 +384,19 @@ export default function Dashboard() {
                     </div>
                 </a>
 
-                <a href="/settings?tab=calendar" className="glass-card overview-card">
+                <a href="/settings/?tab=calendar" className="glass-card overview-card">
                     <div className="overview-card-top">
                         <div className="overview-icon emerald"><IconCalendar width={18} height={18} /></div>
-                        <span className={`badge ${googleAuth === "Authenticated" ? "badge-emerald" : "badge-amber"}`}>
-                            {googleAuth === "Authenticated" ? "Auth OK" : googleAuth}
+                        <span
+                            className={`badge ${overviewBadgeOk ? "badge-emerald" : "badge-amber"}`}
+                            title={`Calendar: ${authStatus[calProviderKey] || "—"} · Tasks: ${authStatus[tasksProviderKey] || "—"}`}
+                        >
+                            {overviewBadgeLabel}
                         </span>
                     </div>
                     <div>
                         <div className="overview-label">Calendar & Tasks</div>
-                        <div className="overview-value">Cal: {calProvider}</div>
+                        <div className="overview-value">Calendar: {calProvider}</div>
                         <div className="overview-meta">Tasks: {tasksProvider}</div>
                     </div>
                 </a>
@@ -488,13 +501,15 @@ export default function Dashboard() {
                             </div>
                             <div className="service-row">
                                 <span className="service-row-left"><IconCalendar width={15} height={15} /><span>Calendar · {calProvider}</span></span>
-                                <span className={`badge ${googleAuth === "Authenticated" || calProvider !== "Google" ? "badge-emerald" : "badge-amber"}`}>
-                                    {calendarConfig ? (calProvider === "Google" ? googleAuth : "Selected") : "…"}
+                                <span className={`badge ${calReady ? "badge-emerald" : "badge-amber"}`}>
+                                    {calendarConfig ? (authStatus[calProviderKey] || "—") : "…"}
                                 </span>
                             </div>
                             <div className="service-row">
                                 <span className="service-row-left"><IconCheckSquare width={15} height={15} /><span>Tasks · {tasksProvider}</span></span>
-                                <span className="badge badge-emerald">Configured</span>
+                                <span className={`badge ${tasksReady ? "badge-emerald" : "badge-amber"}`}>
+                                    {calendarConfig ? (authStatus[tasksProviderKey] || "—") : "…"}
+                                </span>
                             </div>
                             <div className="service-row">
                                 <span className="service-row-left"><IconUsers width={15} height={15} /><span>Contact policies</span></span>

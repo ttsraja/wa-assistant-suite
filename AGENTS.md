@@ -133,8 +133,26 @@ Env: `WA_ASSISTANT_DATA_DIR`, `DATABASE_URL` (auto), `WA_ENGINE_PORT/HOST`, `WA_
 | Package | `npm run build:desktop:mac` / `build:desktop:win` |
 | Stop / restart | `npm run stop` / `restart` |
 | Ollama model | `ollama pull <model>` |
+| **T0 smoke** | `npm run test:smoke` |
+| **Unit + API** | `npm test` |
+| Unit / API / UI | `npm run test:unit` / `test:api` / `test:ui` |
+| All automated | `npm run test:all` |
 
-No root `lint` / `test`. `setup:auth` script target is **missing** — ignore.
+No root `lint`. `setup:auth` script target is **missing** — ignore.
+
+## Validation gate (before every fix/enhancement push)
+
+Full case catalog: **`docs/TEST_MATRIX.md`** (IDs A–K, tiers T0–T5).
+
+1. Map the diff to domains in the matrix (paths, WA, agent, policy, LLM, calendar, UI, desktop, security, regressions).
+2. **Always** run `npm run test:smoke` (T0).
+3. Run `npm test` (T1+T2) for engine/API/logic changes; add `npm run test:ui` or `npm run test:all` when UI/desktop launcher changes.
+4. Rebuild UI (`npm run build:ui`) if `apps/web-control-center` changed and desktop will be used.
+5. T5 live cases (real WA QR, Google OAuth, OS calendar permissions): execute manually or mark **N/A** with reason — never claim pass without evidence.
+6. Tests must use temp data dirs only (see `tests/helpers/engineHarness.js`); never point automated runs at real userData/sessions/tokens.
+7. Include a short **Validation report** in the PR/commit body (tiers + case IDs pass/fail/skip).
+
+Do not push when T0/T1/T2 fail for touched domains.
 
 After wiped `node_modules`: regenerate Prisma; ensure Electron binary installed (`path.txt` + full `Electron.app`).
 
@@ -171,6 +189,7 @@ After wiped `node_modules`: regenerate Prisma; ensure Electron binary installed 
 ## Related docs
 
 - This file — agent SoT
+- `docs/TEST_MATRIX.md` — pre-push test catalog + gate
 - `README.md` — human setup
 - `project summary.md` — technical overview
 - `CLAUDE.md` — points here

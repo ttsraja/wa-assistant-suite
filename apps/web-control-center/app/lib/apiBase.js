@@ -9,24 +9,31 @@
  */
 const FALLBACK = 'http://127.0.0.1:3001';
 
-function normalize(base) {
+export function normalizeApiBase(base) {
     if (!base) return '';
     return String(base).replace(/\/$/, '');
 }
 
-export function getApiBase() {
-    if (typeof window !== 'undefined') {
-        if (window.__WA_API_BASE__) {
-            return normalize(window.__WA_API_BASE__);
+/**
+ * Pure resolver for unit tests. Pass a window-like object and env map.
+ * @param {{ windowLike?: object | null, env?: Record<string, string | undefined> }} [opts]
+ */
+export function resolveApiBase(opts = {}) {
+    const windowLike = opts.windowLike;
+    const env = opts.env || (typeof process !== 'undefined' ? process.env : {});
+
+    if (windowLike) {
+        if (windowLike.__WA_API_BASE__) {
+            return normalizeApiBase(windowLike.__WA_API_BASE__);
         }
-const { protocol, hostname, port, origin } = window.location;
+        const location = windowLike.location || {};
+        const { protocol, hostname, port, origin } = location;
         if (protocol === 'http:' || protocol === 'https:') {
-            // UI hosted by core-engine / Electron (any port except Next dev :3000)
             const isLoopback = hostname === 'localhost' || hostname === '127.0.0.1';
-            if (window.__WA_SAME_ORIGIN_API__) {
+            if (windowLike.__WA_SAME_ORIGIN_API__) {
                 return origin;
             }
-            if (port === '3001' || port === String(process.env.NEXT_PUBLIC_ENGINE_PORT || '')) {
+            if (port === '3001' || port === String(env.NEXT_PUBLIC_ENGINE_PORT || '')) {
                 return origin;
             }
             if (isLoopback && port && port !== '3000') {
@@ -35,9 +42,14 @@ const { protocol, hostname, port, origin } = window.location;
         }
     }
 
-    if (typeof process !== 'undefined' && process.env?.NEXT_PUBLIC_API_BASE) {
-        return normalize(process.env.NEXT_PUBLIC_API_BASE);
+    if (env?.NEXT_PUBLIC_API_BASE) {
+        return normalizeApiBase(env.NEXT_PUBLIC_API_BASE);
     }
 
     return FALLBACK;
+}
+
+export function getApiBase() {
+    const windowLike = typeof window !== 'undefined' ? window : null;
+    return resolveApiBase({ windowLike, env: typeof process !== 'undefined' ? process.env : {} });
 }

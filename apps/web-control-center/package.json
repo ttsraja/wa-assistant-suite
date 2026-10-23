@@ -1,5 +1,6 @@
 {
   "name": "web-control-center",
+  "type": "module",
   "scripts": {
     "dev": "next dev -p 3000",
     "build": "next build",

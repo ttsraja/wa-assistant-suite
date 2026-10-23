@@ -18,7 +18,13 @@
     "dev:desktop": "npm run build:ui && npm --workspace=apps/desktop run dev",
     "dev:desktop:fast": "npm --workspace=apps/desktop run dev",
     "build:desktop:mac": "npm run build:ui && npm --workspace=apps/desktop run dist:mac",
-    "build:desktop:win": "npm run build:ui && npm --workspace=apps/desktop run dist:win"
+    "build:desktop:win": "npm run build:ui && npm --workspace=apps/desktop run dist:win",
+    "test": "npm run test:unit && npm run test:api",
+    "test:unit": "node --test tests/unit/**/*.test.js",
+    "test:api": "node --test tests/api/**/*.test.js",
+    "test:ui": "node --test tests/ui/**/*.test.js",
+    "test:smoke": "node tests/smoke/t0-engine-smoke.mjs",
+    "test:all": "npm run test:unit && npm run test:api && npm run test:ui"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",

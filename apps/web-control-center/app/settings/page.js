@@ -308,15 +308,39 @@ function CalendarTab({ handleGoogleAuth, processing }) {
             .catch(() => {});
     }, []);
 
+    const calKey = config.calendarProvider || "google";
+    const tasksKey = config.tasksProvider || "google";
+    const usesGoogle = calKey === "google" || tasksKey === "google";
+    const statusFor = (key) => config.authStatus?.[key] || (key === "google" ? "Not configured" : "—");
+    const readyFor = (key) => {
+        const s = statusFor(key);
+        return key === "google" ? s === "Authenticated" : s === "Available" || s === "Authenticated";
+    };
+
     const handleSave = async () => {
         setSaving(true);
         setMsg(null);
         try {
-            await fetch(`${getApiBase()}/api/calendar-config`, {
+            const res = await fetch(`${getApiBase()}/api/calendar-config`, {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(config),
+                body: JSON.stringify({
+                    calendarProvider: calKey,
+                    tasksProvider: tasksKey,
+                }),
             });
+            const saved = await res.json().catch(() => ({}));
+            // Re-fetch full config so authStatus stays accurate after save
+            const fresh = await fetch(`${getApiBase()}/api/calendar-config`).then((r) => r.json()).catch(() => null);
+            if (fresh) {
+                setConfig((current) => ({
+                    ...current,
+                    ...fresh,
+                    authStatus: { ...current.authStatus, ...(fresh.authStatus || {}) },
+                }));
+            } else if (saved) {
+                setConfig((current) => ({ ...current, ...saved }));
+            }
             setMsg({ type: "success", text: "Calendar configuration saved." });
         } catch {
             setMsg({ type: "error", text: "Failed to save." });
@@ -334,20 +358,26 @@ function CalendarTab({ handleGoogleAuth, processing }) {
                     <label className="form-label">Calendar Provider (Read Availability)</label>
                     <select
                         className="custom-select"
-                        value={config.calendarProvider || "google"}
+                        value={calKey}
                         onChange={(e) => setConfig((c) => ({ ...c, calendarProvider: e.target.value }))}
                     >
                         {CALENDAR_PROVIDERS.map((p) => (
                             <option key={p.value} value={p.value}>{p.label}</option>
                         ))}
                     </select>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                        <span className="form-hint" style={{ margin: 0 }}>Status:</span>
+                        <span className={`badge ${readyFor(calKey) ? "badge-emerald" : "badge-amber"}`}>
+                            {statusFor(calKey)}
+                        </span>
+                    </div>
                 </div>
 
                 <div className="form-group">
                     <label className="form-label">Tasks / Reminders Provider (Write Notes)</label>
                     <select
                         className="custom-select"
-                        value={config.tasksProvider || "google"}
+                        value={tasksKey}
                         onChange={(e) => setConfig((c) => ({ ...c, tasksProvider: e.target.value }))}
                     >
                         {CALENDAR_PROVIDERS.map((p) => (
@@ -355,10 +385,17 @@ function CalendarTab({ handleGoogleAuth, processing }) {
                         ))}
                     </select>
                     <p className="form-hint">Calendar and Tasks can use different providers independently.</p>
+                    <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8 }}>
+                        <span className="form-hint" style={{ margin: 0 }}>Status:</span>
+                        <span className={`badge ${readyFor(tasksKey) ? "badge-emerald" : "badge-amber"}`}>
+                            {statusFor(tasksKey)}
+                        </span>
+                    </div>
                 </div>
 
+                {usesGoogle && (
                 <div className="form-group">
-                    <label className="form-label">Google Calendar Auth Status</label>
+                    <label className="form-label">Google OAuth (only when Google is selected)</label>
                     <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 8, flexWrap: "wrap" }}>
                         <span className={`badge ${config.authStatus?.google === "Authenticated" ? "badge-emerald" : "badge-amber"}`}>
                             {config.authStatus?.google || "Not configured"}
@@ -373,7 +410,9 @@ function CalendarTab({ handleGoogleAuth, processing }) {
                             {processing === "google" ? "Processing..." : "Re-authenticate Google"}
                         </button>
                     </div>
+                    <p className="form-hint">Required only if Calendar or Tasks provider is Google. macOS / Windows do not use this.</p>
                 </div>
+                )}
 
                 {msg && (
                     <div className={`alert ${msg.type === "success" ? "alert-success" : "alert-error"}`}>{msg.text}</div>

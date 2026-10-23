@@ -66,11 +66,16 @@ function normalizeNoteText(value) {
         .slice(0, 400);
 }
 
-function noteFingerprint(args = {}) {
+export function noteFingerprint(args = {}) {
     const sender = String(args.senderId || args.senderName || 'unknown').trim().toLowerCase();
     const type = String(args.noteType || 'GENERAL_NOTE').trim().toUpperCase();
     const summary = normalizeNoteText(args.messageSummary || args.summary || '');
     return `${sender}|${type}|${summary}`;
+}
+
+/** Test helper — clear in-memory note dedupe cache. */
+export function resetNoteDedupeForTests() {
+    recentNoteWrites.clear();
 }
 
 function pruneRecentNoteWrites(now = Date.now()) {
