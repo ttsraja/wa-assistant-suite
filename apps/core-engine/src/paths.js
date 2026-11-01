@@ -42,7 +42,13 @@ export function resolveDatabaseFile(dataDir) {
 
 /** Prisma `file:` URL for an absolute filesystem path (cross-platform). */
 export function toPrismaSqliteUrl(absoluteDbPath) {
-    const abs = path.resolve(absoluteDbPath);
+    const raw = String(absoluteDbPath ?? '');
+    // Detect Windows drive paths before path.resolve (POSIX resolve would prefix cwd).
+    const preNorm = raw.replace(/\\/g, '/');
+    if (/^[A-Za-z]:\//.test(preNorm)) {
+        return `file:${preNorm}`;
+    }
+    const abs = path.resolve(raw);
     // Prisma accepts file:/path on Unix and file:C:/path on Windows
     const normalized = abs.replace(/\\/g, '/');
     if (/^[A-Za-z]:\//.test(normalized)) {

@@ -190,6 +190,7 @@ After wiped `node_modules`: regenerate Prisma; ensure Electron binary installed 
 
 - This file — agent SoT
 - `docs/TEST_MATRIX.md` — pre-push test catalog + gate
+- `docs/UNIT_TESTS.md` — T1 unit edge-case inventory
 - `README.md` — human setup
 - `project summary.md` — technical overview
 - `CLAUDE.md` — points here

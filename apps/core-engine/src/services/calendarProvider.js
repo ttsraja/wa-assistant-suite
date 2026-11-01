@@ -67,9 +67,10 @@ function normalizeNoteText(value) {
 }
 
 export function noteFingerprint(args = {}) {
-    const sender = String(args.senderId || args.senderName || 'unknown').trim().toLowerCase();
-    const type = String(args.noteType || 'GENERAL_NOTE').trim().toUpperCase();
-    const summary = normalizeNoteText(args.messageSummary || args.summary || '');
+    const a = args && typeof args === 'object' ? args : {};
+    const sender = String(a.senderId || a.senderName || 'unknown').trim().toLowerCase();
+    const type = String(a.noteType || 'GENERAL_NOTE').trim().toUpperCase();
+    const summary = normalizeNoteText(a.messageSummary || a.summary || '');
     return `${sender}|${type}|${summary}`;
 }
 

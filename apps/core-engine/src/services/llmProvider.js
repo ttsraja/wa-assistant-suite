@@ -92,7 +92,7 @@ async function ollamaChat({ model, messages, tools }) {
 // ── Shared helpers for vendor message conversion ─────────────────────────────
 
 /** Parse tool-call arguments that may already be objects or JSON strings. */
-function parseToolArgs(args) {
+export function parseToolArgs(args) {
     if (args == null) return {};
     if (typeof args === 'object') return args;
     if (typeof args === 'string') {
@@ -102,7 +102,7 @@ function parseToolArgs(args) {
 }
 
 /** Coerce tool result payloads into a plain object (Gemini functionResponse). */
-function toFunctionResponseObject(content) {
+export function toFunctionResponseObject(content) {
     if (content != null && typeof content === 'object') return content;
     if (typeof content === 'string') {
         try {

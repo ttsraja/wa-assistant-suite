@@ -2,6 +2,8 @@
 
 Source of truth for cases agents and humans run before shipping fixes/enhancements.
 
+**Unit test detail (T1 edge cases):** [`UNIT_TESTS.md`](./UNIT_TESTS.md).
+
 ## Tiers
 
 | Tier | Command | What | Required when |
@@ -45,7 +47,7 @@ Each ID: **tier**, short expected result.
 | A3 | T1 | `DATABASE_URL` matches sqlite file URL |
 | A4 | T1 | ensure dirs does not wipe existing DB file |
 | A5 | T2 | First-run schema push; second start keeps rows |
-| A6 | T2 | `/api/system` version + durability; upgrade meta does not wipe data |
+| A6 | T1/T2 | upgrade meta does not wipe data; `/api/system` durability |
 | A7 | T1 | Chrome path prefers `PUPPETEER_EXECUTABLE_PATH` |
 | A8 | T1 | Lock cleanup safe if session missing |
 
@@ -159,6 +161,7 @@ tests/
   api/*.test.js
   ui/*.test.js
 docs/TEST_MATRIX.md
+docs/UNIT_TESTS.md
 ```
 
 ## Out of scope (v1)
