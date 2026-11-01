@@ -4,12 +4,10 @@
  * Providers: google | macos | windows
  */
 
-import { PrismaClient } from '@prisma/client';
 import { exec } from 'child_process';
 import { promisify } from 'util';
+import { prisma } from '../db.js';
 import { getUpcomingSchedule as googleCalendar, recordUserNote as googleTasks } from './google.js';
-
-const prisma = new PrismaClient();
 const execAsync = promisify(exec);
 
 // ── Cached config ──────────────────────────────────────────────────────────────
@@ -68,11 +66,17 @@ function normalizeNoteText(value) {
         .slice(0, 400);
 }
 
-function noteFingerprint(args = {}) {
-    const sender = String(args.senderId || args.senderName || 'unknown').trim().toLowerCase();
-    const type = String(args.noteType || 'GENERAL_NOTE').trim().toUpperCase();
-    const summary = normalizeNoteText(args.messageSummary || args.summary || '');
+export function noteFingerprint(args = {}) {
+    const a = args && typeof args === 'object' ? args : {};
+    const sender = String(a.senderId || a.senderName || 'unknown').trim().toLowerCase();
+    const type = String(a.noteType || 'GENERAL_NOTE').trim().toUpperCase();
+    const summary = normalizeNoteText(a.messageSummary || a.summary || '');
     return `${sender}|${type}|${summary}`;
+}
+
+/** Test helper — clear in-memory note dedupe cache. */
+export function resetNoteDedupeForTests() {
+    recentNoteWrites.clear();
 }
 
 function pruneRecentNoteWrites(now = Date.now()) {

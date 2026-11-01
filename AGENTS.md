@@ -4,130 +4,215 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 ## Architecture
 
-npm **workspaces** monorepo (`apps/*`). Runtime loop: WhatsApp DM → contact policy → LLM draft (optional calendar/task tools) → auto-send or approval queue → conversation log.
+npm **workspaces** monorepo (`apps/*`, product version **1.0.0** in root `version.json`).
+
+**Runtime loop:** WhatsApp DM → contact policy → LLM draft (global **response tone** + optional calendar/task tools) → auto-send or approval queue → conversation log.
 
 | Path | Role |
 | :--- | :--- |
-| `apps/core-engine` | Backend **:3001** — WhatsApp (`whatsapp-web.js` + Puppeteer/Chrome), Express REST, Socket.IO `state`, Prisma/SQLite, orchestration |
-| `apps/web-control-center` | Next.js **:3000** — live status/QR, logs, settings, approval queue. Talks to engine over REST/Socket.IO only (no WhatsApp or Prisma) |
-| `packages/` | Reserved for shared non-UI utilities; empty/placeholder today — logic lives in core-engine |
+| `apps/core-engine` | Backend (default **:3001**) — WhatsApp (`whatsapp-web.js` + Puppeteer/Chrome), Express REST, Socket.IO, Prisma/SQLite |
+| `apps/web-control-center` | Next.js control center — macOS-style shell UI. Dev **:3000**; static export `out/` for desktop |
+| `apps/desktop` | Electron shell (macOS + Windows) — embeds engine + static UI on one origin |
+| `packages/` | Reserved shared utils; empty today |
+| `version.json` | Canonical `version`, `schemaVersion`, `channel`, `productId` |
 
-**Entrypoint:** `apps/core-engine/src/server.js` — WA client lifecycle, HTTP routes, Socket.IO, graceful shutdown, in-memory `botState` synced from Prisma `Config`.
+**Operator modes**
+
+1. **Browser dev** — `npm run dev` (engine + Next on 3000/3001)
+2. **Desktop dev** — `npm run dev:desktop` / `dev:desktop:fast` (stock Electron + `userData` DB)
+
+### Core engine
+
+**Entrypoint / embed API:** `apps/core-engine/src/server.js`
+
+```js
+import { startEngine, stopEngine } from './server.js';
+// startEngine({ dataDir, port, host, initWhatsApp, exitProcessOnSignal, staticUiDir })
+// stopEngine({ exitProcess })  // true only for CLI
+```
+
+- CLI: `npm run dev:engine` → `0.0.0.0:3001`
+- Exports: `.`, `./server`, `./paths`, `./db`
+
+| Module | Role |
+| :--- | :--- |
+| `src/paths.js` | Portable data dir, Chrome path, session lock cleanup (mac/win/linux) |
+| `src/db.js` | Shared Prisma + `ensureDatabaseSchema()` (first-run **and** additive column upgrades) |
+| `src/appMeta.js` | Version + `{dataDir}/app-meta.json` upgrade history (never wipes user data) |
+| `src/services/ollamaAgent.js` | Message/tools/dispatch — **provider-agnostic** |
+| `src/services/responseTone.js` | Global Master Agent tone → system-prompt overlay (all LLM vendors) |
+| `src/services/llmProvider.js` | Multi-provider `llmChat` + vendor adapters only |
+| `src/services/calendarProvider.js` | google \| macos \| windows |
+| `src/services/contactPolicy.js` | Policies + approvals |
+| `src/services/google.js` / `googleOauth.js` | Google Calendar/Tasks + OAuth |
 
 ### Message flow
 
-1. Connect — clear stale Chromium session locks, `LocalAuth` under `.wwebjs_auth`, emit QR / READY via Socket.IO
-2. Receive — `message_create`; ignore groups, status/broadcast, self, empty bodies, pre-startup timestamps
-3. Govern — `contactPolicy` (tone, info level, restricted topics, `requiresApproval`, custom instructions)
-4. Decide — `ollamaAgent.handleIncomingMessage` → `llmChat({ messages, tools })`; tools may read calendar / create tasks
-5. Approve (optional) — `PendingApproval`; UI approve (optional edit) / reject → `dispatchApprovedReply`
-6. Send + log — WhatsApp send + `ConversationLog`
+1. Connect — clear Chromium locks; `LocalAuth` under data-dir `.wwebjs_auth`; QR → READY (watchdog + `change_state`)
+2. Receive — filter groups/status/self/empty/pre-startup
+3. Govern — global `responseTone` + contact tone/info/topics/`requiresApproval`
+4. Decide — `llmChat({ messages, tools })`; calendar/task tools optional
+5. Approve (optional) — `PendingApproval` → edit/send
+6. Log — `ConversationLog`
 
-### Core engine services (`apps/core-engine/src/services/`)
+### LLM contract
 
-| File | Role |
-| :--- | :--- |
-| `ollamaAgent.js` | Incoming pipeline, tool loop, reply dispatch — **provider-agnostic** |
-| `llmProvider.js` | Multi-provider `llmChat` + vendor wire-format adapters only |
-| `calendarProvider.js` | Calendar read + task write (google \| macos \| windows) |
-| `contactPolicy.js` | Per-contact rules + pending approval CRUD |
-| `google.js` / `googleOauth.js` | Google Calendar/Tasks API + OAuth tokens |
+- `llmChat({ messages, tools })` → `{ message: { content, tool_calls? } }`
+- Do **not** branch agent loop on provider; vendor quirks only in `llmProvider.js`
+- Gemini: `systemInstruction` on `getGenerativeModel()`; Claude tool ids; OpenAI/Grok `tool_call_id`
+- No invented cross-provider fallback
 
-### LLM provider contract
+### Master Agent response tone
 
-- **Unified shape:** `llmChat({ messages, tools })` → `{ message: { content, tool_calls? } }` (Ollama-style)
-- Agent loop must **not** branch on provider. Vendor quirks stay in `llmProvider.js`:
-  - **Ollama:** pass-through to local client (`localhost:11434`)
-  - **Gemini:** `systemInstruction` on `getGenerativeModel()` (not raw string-only via `startChat` — avoids 400 on `system_instruction`); history as `contents` with `functionCall` / `functionResponse`
-  - **Claude:** top-level `system`; `tool_use` / `tool_result` with paired ids
-  - **OpenAI / Grok:** assistant `tool_calls` + `tool` messages with `tool_call_id` (Grok default base `https://api.x.ai/v1`)
-- Config: Prisma `LLMConfig` (`provider`, `modelName`, `apiKey`, `baseUrl`); short cache TTL (~10s); keys masked on GET
-- Use real vendor model ids. Failures log/surface to UI — no invented cross-provider fallback unless configured
+- Dashboard **Master Agent Controls** (between Reply Mode and Context): `Config.responseTone`
+- Values: `auto` \| `formal` \| `casual` \| `friendly` \| `concise` \| `tamil` \| `tanglish`
+- Applied in `buildSystemPrompt` via `responseTone.js` **text overlay** — compatible with Ollama, Gemini, Claude, OpenAI, Grok without vendor APIs
+- `POST /api/state` accepts `{ responseTone }`; invalid values normalize to `auto`
+- Per-contact `ContactPolicy.tone` (non-`auto`) still injects **TONE OVERRIDE** and supersedes the global default for that contact
 
-### Prisma models (`apps/core-engine/prisma/schema.prisma`)
+### Portable data
 
-SQLite file `apps/core-engine/prisma/data.db` (gitignored). Models: `Config`, `ConversationLog`, `LLMConfig`, `CalendarConfig`, `ContactPolicy`, `PendingApproval`.
+| Asset | Browser dev default | Desktop / custom `WA_ASSISTANT_DATA_DIR` |
+| :--- | :--- | :--- |
+| SQLite | `apps/core-engine/prisma/data.db` | `{dataDir}/data.db` |
+| WA session | `apps/core-engine/.wwebjs_auth` | `{dataDir}/.wwebjs_auth` |
+| Google | `credentials.json` / `token.json` under data root | same |
+| App meta | `{dataDir}/app-meta.json` | same |
 
-### Engine API surface (`:3001`)
+Env: `WA_ASSISTANT_DATA_DIR`, `DATABASE_URL` (auto), `WA_ENGINE_PORT/HOST`, `WA_UI_ORIGIN`, `WA_STATIC_UI_DIR`, `PUPPETEER_EXECUTABLE_PATH`, `WA_PUPPETEER_HEADLESS`, `WA_APP_VERSION`, `WA_VERSION_FILE`, `WA_UPDATE_*`, `GOOGLE_OAUTH_*`.
 
-- `GET/POST /api/state` — bot on/off + custom context
-- `POST /api/logout` — WA logout + re-init for new QR
-- `GET/POST /api/logs` — conversation logs
-- `GET/POST /api/llm-config`, `GET/POST /api/calendar-config`
-- `GET /api/calendar/google-auth/init|callback` — OAuth redirect `http://localhost:3001/api/calendar/google-auth/callback`
-- `GET/POST/DELETE /api/contact-policies`
-- `GET /api/approvals`, `POST .../approve|reject`
-- `GET /api/debug`, `GET /api/screenshot`
-- Socket.IO `state` events for live UI
+### WhatsApp lifecycle (critical)
 
-### WhatsApp session lifecycle
+- **Init:** Puppeteer `headless: 'new'` (or `WA_PUPPETEER_HEADLESS=false`); ready watchdog; only `READY` means linked
+- **Re-pair (`POST /api/logout`):** destroy client → **delete LocalAuth dir** → new client → fresh QR; ignore spurious `authenticated` until QR seen
+- **UI:** `isConnected` only when `connectionStatus === 'READY'`; poll `/api/state` + Socket.IO
+- Prefer `npm run stop` / Ctrl+C; do not wipe auth unless re-pairing
 
-Session: `apps/core-engine/.wwebjs_auth/` (gitignored). Hard stops leave Chromium locking `userDataDir` → “browser is already running”.
+### Engine API (`:3001`)
 
-Engine behavior to preserve when touching init/shutdown:
-
-- Absolute `LocalAuth` path; Puppeteer `handleSIGINT/SIGTERM/SIGHUP: false` so the app owns shutdown
-- Signals → `client.destroy()`, Prisma disconnect, HTTP close
-- Before `initialize()`: kill only processes bound to this session path; remove `Singleton*` / `DevToolsActivePort`
-- One automatic retry on “browser already running”
-- Prefer `npm run stop` or Ctrl+C over `kill -9`; do not delete the whole auth folder unless the user wants to re-pair QR
+- `GET/POST /api/state`, `POST /api/logout` (full session clear + re-pair)
+- `GET/POST /api/logs`, `llm-config`, `calendar-config`
+- Google OAuth init/callback
+- Contact policies + approvals
+- `GET /api/system` — version, paths, durability, upgrade history
+- `GET /api/debug`, `/api/screenshot`
+- Socket.IO: `state`, `live_log`, `approval_request`
+- Static UI when `staticUiDir` set
 
 ### Web control center
 
-App Router: `app/page.js` (dashboard), `app/settings/page.js` (LLM/calendar/policies), `app/layout.js`, `app/components/`. No separate API routes — all data from core-engine.
+- **Shell:** `AppShell.js` — collapsible sidebar, toolbar, native chrome
+- **Chrome:** `AppChrome.js` — version pill, footer, System panel
+- **API base:** `lib/apiBase.js` — same-origin / `__WA_API_BASE__` / `127.0.0.1:3001`
+- Settings tabs: LLM, Calendar, Contacts, Approvals, **System & Updates**
+- Theme: macOS graphite dark (`#1c1c1e` / `#2c2c2e`) + system accents; light mode
+- `next.config.mjs`: `output: 'export'`, `trailingSlash: true` → `out/`
+- No Next API routes / no Prisma in UI
+
+### Desktop (`apps/desktop`)
+
+| File | Role |
+| :--- | :--- |
+| `run-dev.mjs` | Dev launcher — **stock** Electron binary (`electron .`); do not rename Electron.app (breaks ICU/GPU) |
+| `main.mjs` | `userData` paths, `startEngine`, window (`titleBarStyle: hidden` + traffic lights), dock icon, About |
+| `preload.cjs` | Injects `__WA_API_BASE__` |
+| `build/icon.icns` / `icon.png` | App icons |
+| `build/entitlements.mac.plist` | Signing template |
+
+- **Dev menu bar** may show “Electron” (stock binary). **Packaged** builds use `productName` / `CFBundleName` = WA Assistant Suite
+- electron-builder: mac DMG/zip arm64, win NSIS; `appId` `dev.waassistant.suite` (keep stable)
+- **Packaging gap:** production DMG still needs staged `node_modules` for engine deps — prefer `dev:desktop` for local testing until pack pipeline is complete
+
+### Versioning (upgrade-safe)
+
+- Bump `version.json` only; never change `productId` casually
+- Binary replace does **not** delete DB, WA session, OAuth, policies
+- History in `app-meta.json`
+
+### Prisma / SQLite schema (desktop + browser)
+
+- Canonical schema: `apps/core-engine/prisma/schema.prisma`
+- Browser default DB: `apps/core-engine/prisma/data.db`
+- Desktop DB: `{userData}/data.db` (separate file — **not** updated by a bare root `db:push` unless `DATABASE_URL` points at it)
+- On engine start, `ensureDatabaseSchema()` probes required `Config` columns (incl. `responseTone`). Missing table/column → additive `prisma db push` on the **active** `DATABASE_URL` (preserves rows)
+- `withSchemaRetry()` recovers one drift hit at runtime (e.g. `syncConfig`)
+- After changing `schema.prisma`: `npm run prisma:generate` && `npm run db:push` for the package DB; restart desktop so userData auto-upgrades
+- Strong tests: `tests/unit/prismaSchema.test.js` (A5) — first-run, no-op, legacy upgrade, retry
 
 ## Commands
 
-Run from **repository root**. Workspaces: `apps/core-engine`, `apps/web-control-center`.
-
 | Task | Command |
 | :--- | :--- |
-| Install | `npm install` (core-engine `postinstall` → `prisma generate`) |
-| Prisma client | `npm run prisma:generate` |
-| Apply schema (SQLite) | `npm run db:push` |
-| Both apps | `npm run dev` |
-| Engine only | `npm run dev:engine` → `node --watch-path=src src/server.js` |
-| Web only | `npm run dev:web` → `next dev -p 3000` |
-| Stop | `npm run stop` — SIGTERM then kill ports 3000/3001 + session Chromium |
-| Restart | `npm run restart` |
-| Local Ollama model | `ollama pull <model>` e.g. `ollama pull gemma4:latest` |
+| Install | `npm install` |
+| Prisma | `npm run prisma:generate` / `npm run db:push` |
+| Browser both | `npm run dev` |
+| Engine / web only | `npm run dev:engine` / `dev:web` |
+| Static UI | `npm run build:ui` |
+| Desktop | `npm run dev:desktop` or `dev:desktop:fast` |
+| Package | `npm run build:desktop:mac` / `build:desktop:win` |
+| Stop / restart | `npm run stop` / `restart` |
+| Ollama model | `ollama pull <model>` |
+| **T0 smoke** | `npm run test:smoke` |
+| **Unit + API** | `npm test` |
+| Unit / API / UI | `npm run test:unit` / `test:api` / `test:ui` |
+| All automated | `npm run test:all` |
 
-`npm run setup:auth` is defined in root `package.json` but **`apps/core-engine/src/scripts/setup_auth.js` is missing** — do not rely on it until restored.
+No root `lint`. `setup:auth` script target is **missing** — ignore.
 
-There is **no** root (or workspace) `lint`, `test`, `build`, or single-test script. Do not assume them unless added to `package.json`.
+## Validation gate (before every fix/enhancement push)
 
-After wiped `node_modules`, if the engine crashes with `@prisma/client did not initialize yet`, run `npm run prisma:generate`.
+Full case catalog: **`docs/TEST_MATRIX.md`** (IDs A–K, tiers T0–T5).
+
+1. Map the diff to domains in the matrix (paths, WA, agent, policy, LLM, calendar, UI, desktop, security, regressions).
+2. **Always** run `npm run test:smoke` (T0).
+3. Run `npm test` (T1+T2) for engine/API/logic changes; add `npm run test:ui` or `npm run test:all` when UI/desktop launcher changes.
+4. Rebuild UI (`npm run build:ui`) if `apps/web-control-center` changed and desktop will be used.
+5. T5 live cases (real WA QR, Google OAuth, OS calendar permissions): execute manually or mark **N/A** with reason — never claim pass without evidence.
+6. Tests must use temp data dirs only (see `tests/helpers/engineHarness.js`); never point automated runs at real userData/sessions/tokens.
+7. Include a short **Validation report** in the PR/commit body (tiers + case IDs pass/fail/skip).
+
+Do not push when T0/T1/T2 fail for touched domains.
+
+After wiped `node_modules`: regenerate Prisma; ensure Electron binary installed (`path.txt` + full `Electron.app`).
+
+After **Prisma schema** changes: `npm run prisma:generate && npm run db:push`, then restart desktop/engine so each data dir can auto-upgrade. Never hand-edit live `*.db` in production paths.
 
 ## Agent working rules
 
-1. Prefer root scripts (`npm run dev:engine`, `npm run prisma:generate`, etc.) over ad-hoc paths into workspaces.
-2. Keep approval and policy checks on the **send path** in core-engine — UI-only changes are not enough.
-3. Keep `ollamaAgent.js` provider-agnostic; fix vendor API issues only in `llmProvider.js`.
-4. For WA restart issues, fix lifecycle/locks in `server.js`; do not wipe `.wwebjs_auth` unless re-pairing is requested.
-5. Do not commit runtime artifacts: `.next`, `node_modules`, `.wwebjs_auth`, `*.db`, `.env*`, `credentials.json`, `token.json`.
-6. Google OAuth secrets: `apps/core-engine/credentials.json` + `token.json`, or `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`.
-7. Chrome path: Puppeteer uses `PUPPETEER_EXECUTABLE_PATH` or macOS `/Applications/Google Chrome.app/...` when present.
+1. Prefer root scripts.
+2. Approval/policy on **engine send path**, not UI-only.
+3. Provider quirks only in `llmProvider.js`.
+4. WA issues → `server.js` / `paths.js`; full re-pair clears LocalAuth.
+5. Never commit secrets, sessions, `*.db`, `.next`, `out/`, `release/`, `.runtime/`.
+6. Desktop data under Electron `userData` or `WA_ASSISTANT_DATA_DIR`.
+7. Do not ship writable DB inside the app bundle.
+8. Dev desktop: use stock Electron launcher only.
 
 ## Critical files
 
 | Path | Why |
 | :--- | :--- |
-| `apps/core-engine/src/server.js` | WA lifecycle, routes, Socket.IO, shutdown |
-| `apps/core-engine/prisma/schema.prisma` | Data model |
-| `apps/core-engine/src/services/llmProvider.js` | Provider adapters |
-| `apps/core-engine/src/services/ollamaAgent.js` | Message/agent loop |
-| `apps/core-engine/src/services/contactPolicy.js` | Policies + approvals |
-| `apps/core-engine/src/services/calendarProvider.js` | Calendar/tasks backends |
+| `apps/core-engine/src/server.js` | WA lifecycle, re-pair, APIs, embed |
+| `apps/core-engine/src/paths.js` | Portable paths |
+| `apps/core-engine/src/db.js` | Prisma |
+| `apps/core-engine/src/appMeta.js` | Versioning |
+| `apps/core-engine/src/services/*` | Domain logic |
+| `apps/core-engine/src/services/responseTone.js` | Global reply tone |
 | `apps/web-control-center/app/page.js` | Dashboard |
-| `apps/web-control-center/app/settings/page.js` | Operator settings |
-| `package.json` | Workspace scripts |
-| `README.md` | Human setup |
-| `project summary.md` | Architecture / flow reference |
-| `CLAUDE.md` | Claude Code entrypoint; defers here for architecture/commands |
+| `apps/web-control-center/app/settings/page.js` | Settings |
+| `apps/web-control-center/app/components/AppShell.js` | Native shell |
+| `apps/web-control-center/app/components/AppChrome.js` | Version / System UI |
+| `apps/web-control-center/app/globals.css` | Themes (macOS graphite dark) |
+| `apps/desktop/main.mjs` | Electron main |
+| `apps/desktop/run-dev.mjs` | Stable dev launcher |
+| `version.json` | Product version |
+| `package.json` | Scripts |
 
 ## Related docs
 
-- This file (`AGENTS.md`) — **single source of truth** for architecture and dev commands (agents)
-- `README.md` — human setup, LLM provider table, Google OAuth steps
-- `project summary.md` — domain model and operational flow detail
-- `CLAUDE.md` — thin Claude Code pointer; do not duplicate architecture here
+- This file — agent SoT
+- `docs/TEST_MATRIX.md` — pre-push test catalog + gate
+- `docs/UNIT_TESTS.md` — T1 unit edge-case inventory (includes `responseTone`)
+- `README.md` — human setup
+- `project summary.md` — technical overview
+- `CLAUDE.md` — points here

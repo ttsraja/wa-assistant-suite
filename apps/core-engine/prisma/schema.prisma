@@ -1,6 +1,7 @@
 datasource db {
   provider = "sqlite"
-  url      = "file:./data.db"
+  // Overridden at runtime via DATABASE_URL (see src/paths.js). Default keeps CLI db:push working from apps/core-engine.
+  url      = env("DATABASE_URL")
 }
 
 generator client {
@@ -11,6 +12,9 @@ model Config {
   id            Int     @id @default(1)
   status        String  @default("ON")
   customContext String  @default("")
+  /// Global Master Agent reply tone (auto | formal | casual | friendly | concise | tamil | tanglish).
+  /// Injected into the system prompt for all LLM providers. Per-contact policy tone can override.
+  responseTone  String  @default("auto")
 }
 
 model ConversationLog {

@@ -1,43 +1,87 @@
-# Dependencies
+# =============================================================================
+# WA Assistant Suite — .gitignore
+# Goal: ship a clone that can install & run; never commit secrets or local runtime.
+# =============================================================================
+
+# --- Dependencies (reinstall via npm install) ---------------------------------
 node_modules/
-npm-cache/
 **/node_modules/
+npm-cache/
 **/npm-cache/
 
-# Next.js / build output
+# --- Build / export outputs (regenerate via scripts) -------------------------
+# Next.js
 .next/
+**/.next/
+# Static UI export (npm run build:ui)
 out/
+**/out/
+# Generic compile dirs
 dist/
-build/
+**/dist/
 .turbo/
 *.tsbuildinfo
 
-# Environment & secrets
+# Generic "build/" folders — BUT keep Electron packaging resources in git
+build/
+# Required for electron-builder + public package icons (must be in the clone)
+!apps/desktop/build/
+!apps/desktop/build/**
+
+# Desktop packaged installers (publish via GitHub Releases; do not commit binaries)
+apps/desktop/release/
+apps/desktop/.runtime/
+
+# --- Environment & secrets (never commit) ------------------------------------
 .env
 .env.*
+.env.local
+.env.*.local
+**/.env
+**/.env.*
+# Allow shared templates only
 !.env.example
+!**/.env.example
+
+# Google / OAuth / API material
 credentials.json
-token.json
 **/credentials.json
+token.json
 **/token.json
+*credentials*.json
+*service-account*.json
+**/client_secret*.json
 *.pem
 *.key
+*.p12
+*.pfx
+id_rsa
+id_rsa.*
+*.keystore
 
-# WhatsApp session / cache
+# --- WhatsApp session / Chromium cache ---------------------------------------
 .wwebjs_auth/
 .wwebjs_cache/
 **/.wwebjs_auth/
 **/.wwebjs_cache/
 
-# Local databases & Prisma runtime
+# --- Local databases & Prisma runtime ----------------------------------------
 *.db
 *.db-journal
+*.db-wal
+*.db-shm
 *.sqlite
 *.sqlite-journal
-apps/core-engine/prisma/data.db
-apps/core-engine/prisma/data.db-journal
+*.sqlite-wal
+*.sqlite-shm
 
-# Logs & debug
+# App upgrade/runtime meta (local data dir / package root during dev)
+app-meta.json
+**/app-meta.json
+app-meta.pre-upgrade-*.json
+**/app-meta.pre-upgrade-*.json
+
+# --- Logs --------------------------------------------------------------------
 logs/
 *.log
 npm-debug.log*
@@ -45,8 +89,9 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
-# OS / editor
+# --- OS / editor -------------------------------------------------------------
 .DS_Store
+**/.DS_Store
 Thumbs.db
 .idea/
 .vscode/
@@ -54,14 +99,14 @@ Thumbs.db
 *.swo
 *~
 
-# Test / coverage
+# --- Test / coverage ---------------------------------------------------------
 coverage/
 .nyc_output/
 
-# Agent / local scratch (not app source)
+# --- Agent / local scratch (not product source) ------------------------------
 .claude/
 memory/
 .warp/
 
-# Optional local lockfiles inside workspaces (root package-lock.json is kept)
+# --- Workspace lockfiles (root package-lock.json IS committed) ---------------
 apps/*/package-lock.json

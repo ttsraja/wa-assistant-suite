@@ -1,23 +1,16 @@
 import fs from 'fs';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import { google } from 'googleapis';
+import { getEnginePort, getPaths } from '../paths.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const CALLBACK_PATH = '/api/calendar/google-auth/callback';
 
-function resolveConfigPath(filename) {
-    const cwdPath = path.resolve(process.cwd(), filename);
-    if (fs.existsSync(cwdPath)) return cwdPath;
-
-    const coreEnginePath = path.resolve(__dirname, '../../', filename);
-    if (fs.existsSync(coreEnginePath)) return coreEnginePath;
-
-    return cwdPath;
+function credentialsPath() {
+    return getPaths().credentialsPath;
 }
 
-const credentialsPath = resolveConfigPath('credentials.json');
-const tokenPath = resolveConfigPath('token.json');
+function tokenPath() {
+    return getPaths().tokenPath;
+}
 
 function getOAuthCredentials() {
     const clientId = process.env.GOOGLE_OAUTH_CLIENT_ID;
@@ -25,11 +18,14 @@ function getOAuthCredentials() {
 
     if (clientId && clientSecret) return { clientId, clientSecret };
 
-    if (!fs.existsSync(credentialsPath)) {
-        throw new Error('Google OAuth is not configured. Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET, or add credentials.json to apps/core-engine.');
+    const credPath = credentialsPath();
+    if (!fs.existsSync(credPath)) {
+        throw new Error(
+            'Google OAuth is not configured. Set GOOGLE_OAUTH_CLIENT_ID and GOOGLE_OAUTH_CLIENT_SECRET, or add credentials.json to the app data directory (apps/core-engine in dev).'
+        );
     }
 
-    const credentials = JSON.parse(fs.readFileSync(credentialsPath, 'utf8'));
+    const credentials = JSON.parse(fs.readFileSync(credPath, 'utf8'));
     const client = credentials.installed || credentials.web;
     if (!client?.client_id || !client?.client_secret) {
         throw new Error('credentials.json must contain an installed or web Google OAuth client.');
@@ -40,7 +36,9 @@ function getOAuthCredentials() {
 
 function createOAuthClient() {
     const { clientId, clientSecret } = getOAuthCredentials();
-    const redirectUri = process.env.GOOGLE_OAUTH_REDIRECT_URI || `http://localhost:3001${CALLBACK_PATH}`;
+    const port = getEnginePort();
+    const redirectUri =
+        process.env.GOOGLE_OAUTH_REDIRECT_URI || `http://localhost:${port}${CALLBACK_PATH}`;
     return new google.auth.OAuth2(clientId, clientSecret, redirectUri);
 }
 
@@ -66,25 +64,26 @@ export async function handleGoogleAuthCallback(code) {
         throw new Error('Google did not return an access or refresh token.');
     }
 
-    fs.writeFileSync(tokenPath, JSON.stringify(tokens, null, 2), { mode: 0o600 });
+    fs.writeFileSync(tokenPath(), JSON.stringify(tokens, null, 2), { mode: 0o600 });
 }
 
 export function isGoogleConfigured() {
     try {
         getOAuthCredentials();
-        return fs.existsSync(tokenPath);
+        return fs.existsSync(tokenPath());
     } catch {
         return false;
     }
 }
 
 export function getGoogleAuthClient() {
-    if (!fs.existsSync(tokenPath)) {
+    const tPath = tokenPath();
+    if (!fs.existsSync(tPath)) {
         throw new Error('Google OAuth token is missing. Authenticate Google Calendar in Settings first.');
     }
 
     const oauthClient = createOAuthClient();
-    const tokens = JSON.parse(fs.readFileSync(tokenPath, 'utf8'));
+    const tokens = JSON.parse(fs.readFileSync(tPath, 'utf8'));
     oauthClient.setCredentials(tokens);
     return oauthClient;
 }

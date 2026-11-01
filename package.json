@@ -13,10 +13,22 @@
     "restart": "npm run stop && sleep 2 && npm run dev",
     "db:push": "npm --workspace=apps/core-engine run db:push",
     "prisma:generate": "npm --workspace=apps/core-engine run prisma:generate",
-    "setup:auth": "node apps/core-engine/src/scripts/setup_auth.js"
+    "setup:auth": "node apps/core-engine/src/scripts/setup_auth.js",
+    "build:ui": "npm --workspace=apps/web-control-center run build",
+    "dev:desktop": "npm run build:ui && npm --workspace=apps/desktop run dev",
+    "dev:desktop:fast": "npm --workspace=apps/desktop run dev",
+    "build:desktop:mac": "npm run build:ui && npm --workspace=apps/desktop run dist:mac",
+    "build:desktop:win": "npm run build:ui && npm --workspace=apps/desktop run dist:win",
+    "test": "npm run test:unit && npm run test:api",
+    "test:unit": "node --test tests/unit/**/*.test.js",
+    "test:api": "node --test tests/api/**/*.test.js",
+    "test:ui": "node --test tests/ui/**/*.test.js",
+    "test:smoke": "node tests/smoke/t0-engine-smoke.mjs",
+    "test:all": "npm run test:unit && npm run test:api && npm run test:ui"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
+    "electron": "^33.2.0",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
@@ -25,6 +37,10 @@
     "@prisma/client@5.22.0": true,
     "@prisma/engines@5.22.0": true,
     "fsevents@2.3.3": true,
-    "puppeteer@24.38.0": true
-  }
+    "puppeteer@24.38.0": true,
+    "electron@33.2.0": true,
+    "electron@33.4.11": true,
+    "electron": true
+  },
+  "version": "1.0.0"
 }
