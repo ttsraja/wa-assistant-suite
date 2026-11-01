@@ -29,10 +29,22 @@ const CAL_LABELS = {
     windows: "Windows / Outlook",
 };
 
+/** Global Master Agent tones — must stay aligned with core-engine responseTone.js */
+const RESPONSE_TONE_OPTIONS = [
+    { value: "auto", label: "Auto — mirror sender style" },
+    { value: "formal", label: "Formal / professional" },
+    { value: "casual", label: "Casual" },
+    { value: "friendly", label: "Warm & friendly" },
+    { value: "concise", label: "Concise / brief" },
+    { value: "tamil", label: "Tamil (தமிழ்)" },
+    { value: "tanglish", label: "Tanglish" },
+];
+
 export default function Dashboard() {
-    const [state, setState] = useState({
+const [state, setState] = useState({
         status: "ON",
         customContext: "",
+        responseTone: "auto",
         qrCode: null,
         connectionStatus: "INITIALIZING",
         loadingProgress: null,
@@ -451,7 +463,7 @@ export default function Dashboard() {
                         Master Agent Controls
                     </h2>
 
-                    <div className="form-group">
+<div className="form-group">
                         <label className="form-label">Autonomous Reply Mode</label>
                         <select
                             value={state.status}
@@ -465,6 +477,24 @@ export default function Dashboard() {
                             {state.status === "ON"
                                 ? "Incoming WhatsApp messages are analyzed by the configured LLM and auto-replied with tool access."
                                 : "Incoming messages appear in the Live Feed, but the AI will not send replies."}
+                        </div>
+                    </div>
+
+                    <div className="form-group">
+                        <label className="form-label">Response Tone</label>
+                        <select
+                            value={state.responseTone || "auto"}
+                            onChange={(e) => updateState({ responseTone: e.target.value })}
+                            className="custom-select"
+                            disabled={isSaving}
+                        >
+                            {RESPONSE_TONE_OPTIONS.map((opt) => (
+                                <option key={opt.value} value={opt.value}>{opt.label}</option>
+                            ))}
+                        </select>
+                        <div className="form-hint">
+                            Default style for all replies across Ollama, Gemini, Claude, OpenAI, and Grok.
+                            Per-contact policy tone (Settings → Contacts) overrides this when set.
                         </div>
                     </div>
 

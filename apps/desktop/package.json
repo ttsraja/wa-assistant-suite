@@ -4,6 +4,9 @@
   "version": "1.0.0",
   "private": true,
   "description": "WhatsApp AI Assistant — desktop shell (macOS + Windows)",
+  "author": "WA Assistant Suite",
+  "homepage": "https://github.com/ttsraja/wa-assistant-suite",
+  "license": "MIT",
   "main": "main.mjs",
   "type": "module",
   "scripts": {
@@ -11,18 +14,19 @@
     "start": "node ./run-dev.mjs",
     "pack": "electron-builder --dir",
     "dist": "electron-builder",
-    "dist:mac": "electron-builder --mac",
+    "dist:mac": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac",
     "dist:win": "electron-builder --win",
-    "dist:mac:dir": "electron-builder --mac dir --arm64",
+    "dist:mac:dir": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dir --arm64",
     "dist:mac:unsigned": "CSC_IDENTITY_AUTO_DISCOVERY=false electron-builder --mac dmg zip --arm64"
   },
   "devDependencies": {
-    "electron": "^33.2.0",
-    "electron-builder": "^25.1.8"
+    "electron": "33.4.11",
+    "electron-builder": "25.1.8"
   },
   "build": {
     "appId": "dev.waassistant.suite",
     "productName": "WA Assistant Suite",
+    "electronVersion": "33.4.11",
     "copyright": "Copyright © WA Assistant Suite",
     "directories": {
       "output": "release",

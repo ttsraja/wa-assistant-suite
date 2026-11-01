@@ -36,14 +36,18 @@ export function buildPolicyPromptOverlay(policy) {
     const lines = [];
 
     // ── Tone
-    if (policy.tone && policy.tone !== 'auto') {
+if (policy.tone && policy.tone !== 'auto') {
         const toneMap = {
             formal: 'Use strictly formal, professional language. No emojis. No casual abbreviations.',
             casual: 'Use casual, friendly language. Emojis are welcome. Keep it conversational.',
             tamil: 'Respond in Tamil (தமிழ்) language wherever possible. Mirror the sender\'s Tamil usage.',
             tanglish: 'Respond in Tanglish (Tamil + English mix). Mirror the sender\'s style naturally.'
         };
-        if (toneMap[policy.tone]) lines.push(`\nTONE OVERRIDE: ${toneMap[policy.tone]}`);
+        if (toneMap[policy.tone]) {
+            lines.push(
+                `\nTONE OVERRIDE (per-contact — overrides Master Agent global response tone): ${toneMap[policy.tone]}`
+            );
+        }
     }
 
     // ── Information Level

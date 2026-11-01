@@ -6,7 +6,7 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 
 npm **workspaces** monorepo (`apps/*`, product version **1.0.0** in root `version.json`).
 
-**Runtime loop:** WhatsApp DM → contact policy → LLM draft (optional calendar/task tools) → auto-send or approval queue → conversation log.
+**Runtime loop:** WhatsApp DM → contact policy → LLM draft (global **response tone** + optional calendar/task tools) → auto-send or approval queue → conversation log.
 
 | Path | Role |
 | :--- | :--- |
@@ -37,9 +37,10 @@ import { startEngine, stopEngine } from './server.js';
 | Module | Role |
 | :--- | :--- |
 | `src/paths.js` | Portable data dir, Chrome path, session lock cleanup (mac/win/linux) |
-| `src/db.js` | Shared Prisma + first-run `ensureDatabaseSchema()` |
+| `src/db.js` | Shared Prisma + `ensureDatabaseSchema()` (first-run **and** additive column upgrades) |
 | `src/appMeta.js` | Version + `{dataDir}/app-meta.json` upgrade history (never wipes user data) |
 | `src/services/ollamaAgent.js` | Message/tools/dispatch — **provider-agnostic** |
+| `src/services/responseTone.js` | Global Master Agent tone → system-prompt overlay (all LLM vendors) |
 | `src/services/llmProvider.js` | Multi-provider `llmChat` + vendor adapters only |
 | `src/services/calendarProvider.js` | google \| macos \| windows |
 | `src/services/contactPolicy.js` | Policies + approvals |
@@ -49,7 +50,7 @@ import { startEngine, stopEngine } from './server.js';
 
 1. Connect — clear Chromium locks; `LocalAuth` under data-dir `.wwebjs_auth`; QR → READY (watchdog + `change_state`)
 2. Receive — filter groups/status/self/empty/pre-startup
-3. Govern — tone, info level, restricted topics, `requiresApproval`
+3. Govern — global `responseTone` + contact tone/info/topics/`requiresApproval`
 4. Decide — `llmChat({ messages, tools })`; calendar/task tools optional
 5. Approve (optional) — `PendingApproval` → edit/send
 6. Log — `ConversationLog`
@@ -60,6 +61,14 @@ import { startEngine, stopEngine } from './server.js';
 - Do **not** branch agent loop on provider; vendor quirks only in `llmProvider.js`
 - Gemini: `systemInstruction` on `getGenerativeModel()`; Claude tool ids; OpenAI/Grok `tool_call_id`
 - No invented cross-provider fallback
+
+### Master Agent response tone
+
+- Dashboard **Master Agent Controls** (between Reply Mode and Context): `Config.responseTone`
+- Values: `auto` \| `formal` \| `casual` \| `friendly` \| `concise` \| `tamil` \| `tanglish`
+- Applied in `buildSystemPrompt` via `responseTone.js` **text overlay** — compatible with Ollama, Gemini, Claude, OpenAI, Grok without vendor APIs
+- `POST /api/state` accepts `{ responseTone }`; invalid values normalize to `auto`
+- Per-contact `ContactPolicy.tone` (non-`auto`) still injects **TONE OVERRIDE** and supersedes the global default for that contact
 
 ### Portable data
 
@@ -120,6 +129,16 @@ Env: `WA_ASSISTANT_DATA_DIR`, `DATABASE_URL` (auto), `WA_ENGINE_PORT/HOST`, `WA_
 - Binary replace does **not** delete DB, WA session, OAuth, policies
 - History in `app-meta.json`
 
+### Prisma / SQLite schema (desktop + browser)
+
+- Canonical schema: `apps/core-engine/prisma/schema.prisma`
+- Browser default DB: `apps/core-engine/prisma/data.db`
+- Desktop DB: `{userData}/data.db` (separate file — **not** updated by a bare root `db:push` unless `DATABASE_URL` points at it)
+- On engine start, `ensureDatabaseSchema()` probes required `Config` columns (incl. `responseTone`). Missing table/column → additive `prisma db push` on the **active** `DATABASE_URL` (preserves rows)
+- `withSchemaRetry()` recovers one drift hit at runtime (e.g. `syncConfig`)
+- After changing `schema.prisma`: `npm run prisma:generate` && `npm run db:push` for the package DB; restart desktop so userData auto-upgrades
+- Strong tests: `tests/unit/prismaSchema.test.js` (A5) — first-run, no-op, legacy upgrade, retry
+
 ## Commands
 
 | Task | Command |
@@ -156,6 +175,8 @@ Do not push when T0/T1/T2 fail for touched domains.
 
 After wiped `node_modules`: regenerate Prisma; ensure Electron binary installed (`path.txt` + full `Electron.app`).
 
+After **Prisma schema** changes: `npm run prisma:generate && npm run db:push`, then restart desktop/engine so each data dir can auto-upgrade. Never hand-edit live `*.db` in production paths.
+
 ## Agent working rules
 
 1. Prefer root scripts.
@@ -176,6 +197,7 @@ After wiped `node_modules`: regenerate Prisma; ensure Electron binary installed 
 | `apps/core-engine/src/db.js` | Prisma |
 | `apps/core-engine/src/appMeta.js` | Versioning |
 | `apps/core-engine/src/services/*` | Domain logic |
+| `apps/core-engine/src/services/responseTone.js` | Global reply tone |
 | `apps/web-control-center/app/page.js` | Dashboard |
 | `apps/web-control-center/app/settings/page.js` | Settings |
 | `apps/web-control-center/app/components/AppShell.js` | Native shell |
@@ -190,7 +212,7 @@ After wiped `node_modules`: regenerate Prisma; ensure Electron binary installed 
 
 - This file — agent SoT
 - `docs/TEST_MATRIX.md` — pre-push test catalog + gate
-- `docs/UNIT_TESTS.md` — T1 unit edge-case inventory
+- `docs/UNIT_TESTS.md` — T1 unit edge-case inventory (includes `responseTone`)
 - `README.md` — human setup
 - `project summary.md` — technical overview
 - `CLAUDE.md` — points here

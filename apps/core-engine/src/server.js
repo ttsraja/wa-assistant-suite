@@ -26,7 +26,7 @@ import {
     clearStaleChromiumLocks,
     killStaleSessionBrowsers,
 } from './paths.js';
-import { prisma, disconnectPrisma, ensureDatabaseSchema } from './db.js';
+import { prisma, disconnectPrisma, ensureDatabaseSchema, withSchemaRetry } from './db.js';
 import { handleIncomingMessage, dispatchApprovedReply } from './services/ollamaAgent.js';
 import { getLLMConfig, invalidateLLMCache } from './services/llmProvider.js';
 import { getCalendarConfig, invalidateCalendarCache } from './services/calendarProvider.js';
@@ -41,6 +41,7 @@ import {
 } from './services/contactPolicy.js';
 import { getGoogleAuthUrl, handleGoogleAuthCallback, isGoogleConfigured } from './services/googleOauth.js';
 import { ensureAppMeta, getSystemInfo } from './appMeta.js';
+import { normalizeResponseTone } from './services/responseTone.js';
 
 /** @type {null | {
  *   paths: ReturnType<typeof getPaths>,
@@ -64,6 +65,7 @@ function createInitialBotState() {
     return {
         status: 'ON',
         customContext: 'Busy at work',
+        responseTone: 'auto',
         qrCode: null,
         connectionStatus: 'INITIALIZING',
         loadingProgress: null,
@@ -234,14 +236,17 @@ function startReadyWatchdog(rt) {
 }
 
 async function syncConfig(rt) {
-    let conf = await prisma.config.findUnique({ where: { id: 1 } });
-    if (!conf) {
-        conf = await prisma.config.create({
-            data: { id: 1, status: 'ON', customContext: 'Busy at work' },
-        });
-    }
-    rt.botState.status = conf.status;
-    rt.botState.customContext = conf.customContext;
+    await withSchemaRetry(async () => {
+        let conf = await prisma.config.findUnique({ where: { id: 1 } });
+        if (!conf) {
+            conf = await prisma.config.create({
+                data: { id: 1, status: 'ON', customContext: 'Busy at work', responseTone: 'auto' },
+            });
+        }
+        rt.botState.status = conf.status;
+        rt.botState.customContext = conf.customContext;
+        rt.botState.responseTone = normalizeResponseTone(conf.responseTone ?? 'auto');
+    });
 }
 
 function attachWhatsAppHandlers(rt) {
@@ -402,13 +407,28 @@ function attachHttpRoutes(rt) {
         }
     });
 
-    app.post('/api/state', async (req, res) => {
-        const { status, customContext } = req.body;
+app.post('/api/state', async (req, res) => {
+        const { status, customContext, responseTone } = req.body;
         const updateData = {};
         if (status !== undefined) updateData.status = status;
         if (customContext !== undefined) updateData.customContext = customContext;
-        await prisma.config.update({ where: { id: 1 }, data: updateData });
+        if (responseTone !== undefined) updateData.responseTone = normalizeResponseTone(responseTone);
+        // Ensure Config row exists (fresh data dirs)
+        const existing = await prisma.config.findUnique({ where: { id: 1 } });
+        if (!existing) {
+            await prisma.config.create({
+                data: {
+                    id: 1,
+                    status: updateData.status || 'ON',
+                    customContext: updateData.customContext ?? 'Busy at work',
+                    responseTone: updateData.responseTone || 'auto',
+                },
+            });
+        } else if (Object.keys(updateData).length > 0) {
+            await prisma.config.update({ where: { id: 1 }, data: updateData });
+        }
         rt.botState = { ...rt.botState, ...updateData };
+        if (updateData.responseTone) rt.botState.responseTone = updateData.responseTone;
         io.emit('state', rt.botState);
         res.json(rt.botState);
     });

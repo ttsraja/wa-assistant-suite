@@ -1,6 +1,7 @@
 import { llmChat } from './llmProvider.js';
 import { getUpcomingSchedule, recordUserNote } from './calendarProvider.js';
 import { getContactPolicy, buildPolicyPromptOverlay, createPendingApproval, markApprovalSent } from './contactPolicy.js';
+import { buildGlobalToneOverlay, normalizeResponseTone } from './responseTone.js';
 import { prisma } from '../db.js';
 const conversationContext = new Map();
 
@@ -57,9 +58,26 @@ function getAvailabilityContext() {
 }
 
 // ── Base system prompt ────────────────────────────────────────────────────────
-function buildSystemPrompt(firstName, customContext, policyOverlay = '') {
+/**
+ * Build the provider-agnostic system prompt (works for ollama/gemini/claude/openai/grok).
+ * Tone is injected as text instructions — never via vendor-specific APIs.
+ * @param {string} firstName
+ * @param {string} customContext
+ * @param {string} [policyOverlay]
+ * @param {string} [responseTone] global Master Agent tone
+ */
+export function buildSystemPrompt(firstName, customContext, policyOverlay = '', responseTone = 'auto') {
     const { displayTime, defaultStatus } = getAvailabilityContext();
     const userStatusText = customContext || defaultStatus;
+    const toneOverlay = buildGlobalToneOverlay(responseTone);
+    const tone = normalizeResponseTone(responseTone);
+    // When a global language tone is set, soften the default "mirror sender" LANGUAGE rule.
+    const languageRule =
+        tone === 'tamil' || tone === 'tanglish'
+            ? 'Follow GLOBAL RESPONSE TONE for language. Still keep replies short and human.'
+            : tone === 'auto'
+                ? 'Mirror the sender\'s language style (Tamil, Tanglish, or English). Keep it short, human, and use emojis when appropriate.'
+                : 'Follow GLOBAL RESPONSE TONE for style. Keep replies short and human. Mirror the sender\'s language (Tamil/Tanglish/English) unless the tone requires Tamil/Tanglish.';
 
     return `You are Thanga's intelligent, context-aware executive assistant on WhatsApp.
 
@@ -92,8 +110,8 @@ GREETING RULES:
 PRIVACY:
 - Never reveal meeting titles or subject names. Only say "busy in a meeting" or "free".
 
-LANGUAGE:
-- Mirror the sender's language style (Tamil, Tanglish, or English). Keep it short, human, and use emojis.${policyOverlay}`;
+LANGUAGE / STYLE:
+- ${languageRule}${toneOverlay}${policyOverlay}`;
 }
 
 // ── Main message handler ───────────────────────────────────────────────────────
@@ -153,8 +171,8 @@ export async function handleIncomingMessage(msg, botState, io) {
         // Generate a draft reply first (so owner can edit it)
         let aiDraft = null;
         try {
-            const draftHistory = [
-                { role: 'system', content: buildSystemPrompt(firstName, botState.customContext, policyOverlay) },
+const draftHistory = [
+                { role: 'system', content: buildSystemPrompt(firstName, botState.customContext, policyOverlay, botState.responseTone) },
                 { role: 'user', content: msg.body }
             ];
             const draftResp = await llmChat({ messages: draftHistory, tools: agentTools });
@@ -191,14 +209,14 @@ export async function handleIncomingMessage(msg, botState, io) {
     // ── Normal reply flow ──────────────────────────────────────────────────────
     const isNewSession = !conversationContext.has(userId);
 
-    if (isNewSession) {
+if (isNewSession) {
         conversationContext.set(userId, [
-            { role: 'system', content: buildSystemPrompt(firstName, botState.customContext, policyOverlay) }
+            { role: 'system', content: buildSystemPrompt(firstName, botState.customContext, policyOverlay, botState.responseTone) }
         ]);
     } else {
         const history = conversationContext.get(userId);
         if (history[0]?.role === 'system') {
-            history[0].content = buildSystemPrompt(firstName, botState.customContext, policyOverlay);
+            history[0].content = buildSystemPrompt(firstName, botState.customContext, policyOverlay, botState.responseTone);
         }
     }
 

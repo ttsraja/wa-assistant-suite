@@ -46,7 +46,7 @@ Each ID: **tier**, short expected result.
 | A2 | T1 | Custom dataDir → `{dir}/data.db`, `.wwebjs_auth`, credentials/token |
 | A3 | T1 | `DATABASE_URL` matches sqlite file URL |
 | A4 | T1 | ensure dirs does not wipe existing DB file |
-| A5 | T2 | First-run schema push; second start keeps rows |
+| A5 | T1/T2 | First-run + additive column upgrade (`prismaSchema.test.js`); second ensure keeps rows |
 | A6 | T1/T2 | upgrade meta does not wipe data; `/api/system` durability |
 | A7 | T1 | Chrome path prefers `PUPPETEER_EXECUTABLE_PATH` |
 | A8 | T1 | Lock cleanup safe if session missing |

@@ -19,6 +19,8 @@ Parent matrix: [`TEST_MATRIX.md`](./TEST_MATRIX.md). Run with `npm run test:unit
 | `contactPolicy.test.js` | `contactPolicy.js` pure overlays | tone, info, topics, custom |
 | `calendarAndBadge.test.js` | calendar fingerprint + UI libs | note dedupe key, badge, READY, apiBase |
 | `llmHelpers.test.js` | `llmProvider.js` exports | tool args / Gemini response coercion |
+| `responseTone.test.js` | `responseTone.js` + `buildSystemPrompt` | Master Agent global tone |
+| `prismaSchema.test.js` | `db.js` + `schema.prisma` | first-run, additive upgrade, retry |
 
 ---
 
@@ -144,12 +146,49 @@ Parent matrix: [`TEST_MATRIX.md`](./TEST_MATRIX.md). Run with `npm run test:unit
 
 ---
 
+
+---
+
+## responseTone.test.js (Master Agent)
+
+| Case | Edge | Expected |
+| :--- | :--- | :--- |
+| canonical list | values freeze | auto…tanglish |
+| normalize | null/empty/case/unknown | auto or lowercased known |
+| overlay auto | auto/unknown | empty string |
+| overlay each tone | formal…tanglish | GLOBAL RESPONSE TONE + instruction |
+| contact override helper | auto vs formal | false vs true |
+| system prompt auto | no global block | mirror-sender language |
+| system prompt formal | tools + role intact | GLOBAL block present |
+| tamil language rule | tamil tone | Follow GLOBAL…language |
+| policy after global | contact override text | override appears after global |
+| unknown tone prompt | garbage | no GLOBAL block |
+
+
+---
+
+## prismaSchema.test.js (A5 — Prisma / SQLite)
+
+| Case | Edge | Expected |
+| :--- | :--- | :--- |
+| schema.prisma lock | REQUIRED_MODELS + responseTone | all models/fields present in file |
+| isSchemaDriftError | P2021/P2022/no such column vs other | true only for drift |
+| first-run empty dir | no DB file | push creates all tables + Config columns |
+| no-op when current | second ensure | `pushed: false`; row data intact |
+| legacy Config | missing responseTone column | additive upgrade; customContext preserved; default `auto` |
+| orphan sqlite | unrelated table only | Config + full schema appear |
+| withSchemaRetry | P2022 on findUnique | recovers; data preserved |
+| withSchemaRetry non-drift | P1001 | rethrows |
+| other models | LLM/Calendar/ContactPolicy | CRUD works after ensure |
+
+**Regression guarded:** desktop userData lagging package `db:push` (missing `Config.responseTone`) must not crash startup.
+
 ## Gaps intentionally not unit-tested (use T2/T5)
 
 - Full `llmChat` network adapters (F1–F5) — need mocks/HTTP fixtures later
 - `recordUserNote` OS side effects (macOS Reminders) — T5
 - WhatsApp client events / re-pair — T5
-- Prisma CRUD — covered in T2 API suite
+- Prisma full HTTP CRUD — T2 API suite; **schema upgrade path covered in T1 `prismaSchema.test.js`**
 - React component render — T3 source contracts / future Playwright
 
 ## Adding a unit test

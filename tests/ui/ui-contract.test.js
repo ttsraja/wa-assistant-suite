@@ -42,7 +42,18 @@ describe('T3 UI contract (source + optional export)', () => {
         assert.doesNotMatch(src, /Electron\.app\/Contents\/MacOS\/Electron/);
     });
 
-    it('H12 static export exists when built (soft if missing)', () => {
+    it('Master Agent Response Tone control sits between mode and context', () => {
+        const src = readFileSync(pageSrc, 'utf8');
+        assert.match(src, /Response Tone/);
+        assert.match(src, /responseTone/);
+        assert.match(src, /RESPONSE_TONE_OPTIONS/);
+        const modeIdx = src.indexOf('Autonomous Reply Mode');
+        const toneIdx = src.indexOf('Response Tone');
+        const ctxIdx = src.indexOf('Dynamic Prompt Context');
+        assert.ok(modeIdx >= 0 && toneIdx > modeIdx && ctxIdx > toneIdx);
+    });
+
+it('H12 static export exists when built (soft if missing)', () => {
         if (!existsSync(outIndex)) {
             console.warn('skip: out/ not built — run npm run build:ui');
             return;

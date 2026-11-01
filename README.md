@@ -1,123 +1,262 @@
-# WhatsApp AI Assistant Suite
+# WA Assistant Suite
 
-Autonomous WhatsApp assistant with a live control dashboard and optional **desktop app** (Electron). Incoming DMs go through contact policies, a multi-provider LLM (with optional calendar/task tools), optional human approval, then send + log.
+### Your WhatsApp. Your AI. Your rules.
 
-**Version:** see root `version.json` (currently **1.0.0**).
+**WA Assistant Suite** is a private, multi-provider AI assistant that lives next to WhatsApp Web — auto-replies with calendar awareness, contact policies, optional human approval, and a native macOS / Windows desktop app.
 
-## Features
+<p align="center">
+  <a href="https://github.com/ttsraja/wa-assistant-suite/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/ttsraja/wa-assistant-suite?style=for-the-badge&label=Release&color=1c1c1e"></a>
+  <a href="#-download-desktop-app"><img alt="macOS" src="https://img.shields.io/badge/macOS-DMG%20%2F%20ZIP-000000?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="#-download-desktop-app"><img alt="Windows" src="https://img.shields.io/badge/Windows-NSIS%20%2F%20Portable-0078D4?style=for-the-badge&logo=windows&logoColor=white"></a>
+  <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge"></a>
+  <a href="#-run-from-source-developers"><img alt="Node" src="https://img.shields.io/badge/Node.js-LTS-339933?style=for-the-badge&logo=nodedotjs&logoColor=white"></a>
+</p>
 
-- **WhatsApp Web** via `whatsapp-web.js` + system Chrome (Puppeteer)
-- **Multi-provider LLM** — Ollama, Gemini, Claude, OpenAI, Grok
-- **Contact policies** — tone, info level, restricted topics, require-approval
-- **Approval queue** — review/edit before send
-- **Calendar & tasks** — Google OAuth, macOS Calendar/Reminders, Windows/Outlook
-- **Custom context** — e.g. “Busy at work” injected into prompts
-- **Desktop shell** — single-window app; data in OS Application Support (upgrade-safe)
-- **System & Updates** panel — version, data paths, upgrade history
+<p align="center">
+  <strong><a href="#-download-desktop-app">Download the app</a></strong>
+  &nbsp;·&nbsp;
+  <strong><a href="#-run-from-source-developers">Clone &amp; run from source</a></strong>
+  &nbsp;·&nbsp;
+  <strong><a href="https://github.com/ttsraja/wa-assistant-suite/releases">All releases</a></strong>
+</p>
 
-## Architecture
+---
 
-| Path | Role |
+## Why people try it
+
+| | |
 | :--- | :--- |
-| `apps/core-engine` | Backend **:3001** — WhatsApp, REST/Socket.IO, Prisma/SQLite, orchestration |
-| `apps/web-control-center` | Next.js UI — browser **:3000** or static export served by engine/desktop |
-| `apps/desktop` | Electron — starts engine with portable `userData`, loads UI |
-| `version.json` | Product version / channel / productId |
+| **Stay in control** | Pause auto-reply anytime. Require approval for sensitive contacts. |
+| **Your model, your cloud or local** | Ollama on your machine, or Gemini / Claude / OpenAI / Grok. |
+| **Sounds like you** | Global response tone + per-contact tone (formal, casual, Tamil, Tanglish, and more). |
+| **Actually useful tools** | Check free/busy; log meeting requests and notes to Calendar / Tasks / Reminders. |
+| **Desktop-first privacy** | Session, SQLite DB, and OAuth tokens stay on **your** disk — not our servers. |
+| **Upgrade-safe** | App updates do not wipe WhatsApp link, policies, or history. |
 
-Docs for agents: **`AGENTS.md`** (source of truth). Claude: `CLAUDE.md` → defers to AGENTS.
+> Think of it as an executive assistant that never sleeps on WhatsApp — with a control room you own.
 
-## Prerequisites
+---
 
-- Node.js (LTS) + npm
-- Google Chrome (WhatsApp Web automation)
-- Optional: [Ollama](https://ollama.com) for local models
-- Optional: Google Cloud OAuth client for Calendar/Tasks
-- Desktop: Electron is installed via npm (`allowScripts` must allow `electron`)
+## Choose how to get started
 
-## Setup
+| Path | Best for | Time |
+| :--- | :--- | :--- |
+| **[Desktop app](#-download-desktop-app)** | Try the product as a standalone Mac/Windows app | ~5 minutes |
+| **[From source](#-run-from-source-developers)** | Develop, customize, or run the full monorepo | ~10–15 minutes |
+
+---
+
+## Download desktop app
+
+Prebuilt installers are published on **GitHub Releases**. Prefer the **[latest release](https://github.com/ttsraja/wa-assistant-suite/releases/latest)**.
+
+### macOS (Apple Silicon)
+
+| File | Artifact (upload to Releases) | Link |
+| :--- | :--- | :--- |
+| **DMG installer** (recommended) | `WA Assistant Suite-1.0.0-arm64.dmg` | [Download macOS DMG](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA%20Assistant%20Suite-1.0.0-arm64.dmg) |
+| **ZIP** (drag to Applications) | `WA Assistant Suite-1.0.0-arm64-mac.zip` | [Download macOS ZIP](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA%20Assistant%20Suite-1.0.0-arm64-mac.zip) |
+
+**Install**
+
+1. Open the DMG (or unzip) and drag **WA Assistant Suite** to **Applications**.
+2. First launch: if Gatekeeper blocks an unsigned build, right-click → **Open** → confirm (or allow under *System Settings → Privacy & Security*).
+3. Link WhatsApp: phone → **Settings → Linked devices → Link a device** → scan the QR in the app.
+4. Pick an LLM in **Settings → LLM** (Ollama local or a cloud API key).
+
+**Data location (macOS):**  
+`~/Library/Application Support/WA Assistant Suite/`  
+(DB, WhatsApp session, OAuth tokens, upgrade history)
+
+### Windows (x64)
+
+| File | Artifact (upload to Releases) | Link |
+| :--- | :--- | :--- |
+| **NSIS installer** (recommended) | `WA Assistant Suite Setup 1.0.0.exe` | [Download Windows Setup](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA%20Assistant%20Suite%20Setup%201.0.0.exe) |
+| **Portable** (no install) | `WA Assistant Suite 1.0.0.exe` | [Download Windows Portable](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA%20Assistant%20Suite%201.0.0.exe) |
+
+**Install**
+
+1. Run the Setup EXE (or launch the portable build).
+2. Allow Windows SmartScreen if prompted for an unsigned build (*More info → Run anyway*).
+3. Scan the WhatsApp QR and configure your LLM as on macOS.
+
+**Data location (Windows):**  
+`%APPDATA%\WA Assistant Suite\`
+
+### Requirements (desktop)
+
+- **macOS** 12+ (Apple Silicon builds are published; Intel may require building from source)
+- **Windows** 10/11 x64
+- **Google Chrome** (or Edge) installed — used for WhatsApp Web automation
+- Optional: [Ollama](https://ollama.com) for fully local models
+- Optional: Google OAuth client for Google Calendar / Tasks
+
+### About release packages
+
+| Note | Detail |
+| :--- | :--- |
+| **Unsigned builds** | Community/dev releases may not be Apple-notarized or Windows-signed. Use the “Open anyway” path above. |
+| **Exact filenames** | electron-builder may encode spaces as `.` in asset names. If a direct link 404s, open the [Releases page](https://github.com/ttsraja/wa-assistant-suite/releases/latest) and download the listed **dmg / zip / exe**. |
+| **Packaging status** | Production installers still need a complete engine dependency stage for fully offline packaged runs. If a release build fails to start the engine, use **[Run from source](#-run-from-source-developers)** or `npm run dev:desktop:fast` — that path is fully supported today. |
+| **Publishing** | Maintainers: build with `npm run build:desktop:mac` / `build:desktop:win`, then upload artifacts from `apps/desktop/release/` to a GitHub Release tagged `v1.0.0` (or the next version). |
+
+---
+
+## Run from source (developers)
+
+Full monorepo: engine + control center + optional Electron shell.
+
+### Prerequisites
+
+- **Node.js** (LTS) + npm
+- **Google Chrome** (WhatsApp Web / Puppeteer)
+- Optional: Ollama, Google Cloud OAuth credentials
+
+### Clone & install
 
 ```bash
+git clone https://github.com/ttsraja/wa-assistant-suite.git
+cd wa-assistant-suite
 npm install
 npm run prisma:generate
 npm run db:push
 ```
 
-After wiping `node_modules`, run `npm install` or `npm run prisma:generate` before the engine.
-
-## Run (browser)
+Optional env template:
 
 ```bash
-npm run dev                 # engine :3001 + web :3000
-# or
-npm run dev:engine
-npm run dev:web
+cp .env.example apps/core-engine/.env   # edit as needed — never commit secrets
+```
 
-npm run stop                # free ports + session Chromium
+### Option A — Browser control center
+
+```bash
+npm run dev
+```
+
+| Service | URL |
+| :--- | :--- |
+| Dashboard | http://localhost:3000 |
+| Engine API | http://localhost:3001 |
+
+Open the dashboard → scan WhatsApp QR when status is **SCAN_QR**.
+
+```bash
+npm run stop      # free ports + session Chromium
 npm run restart
 ```
 
-Open **http://localhost:3000**. Scan QR when status is `SCAN_QR`.
-
-### WhatsApp session
-
-- Browser dev session: `apps/core-engine/.wwebjs_auth/` (gitignored)
-- Desktop session: `~/Library/Application Support/WA Assistant Suite/.wwebjs_auth` (macOS)
-
-**Unlink / Re-pair** destroys the client and **deletes LocalAuth** so a new QR is required (no false “authenticated” from a stale session).
-
-Prefer `npm run stop` or Ctrl+C over `kill -9`.
-
-## Run (desktop)
+### Option B — Desktop from source (recommended local app)
 
 ```bash
-npm run build:ui            # once (or after UI changes)
-npm run dev:desktop:fast    # Electron + engine + static UI
+npm run build:ui              # once, or after UI changes
+npm run dev:desktop:fast      # Electron + engine + static UI
 # or rebuild UI then launch:
 npm run dev:desktop
 ```
 
-- Data dir (macOS): `~/Library/Application Support/WA Assistant Suite/`
-- Dev menu bar may still say **Electron** (stock binary). Packaged apps use **WA Assistant Suite**.
-- Do not use experimental Electron.app renames — they break GPU/ICU.
+Uses stock Electron (stable GPU/ICU). Dev menu bar may still say “Electron”; product name is **WA Assistant Suite**.
 
-Package (local/unsigned; production packaging still evolving):
+**Databases are per mode:** browser dev uses `apps/core-engine/prisma/data.db`; desktop uses OS Application Support / `%APPDATA%`. Root `db:push` updates the package DB. On startup the engine **auto-applies additive schema upgrades** to the active data dir (user rows preserved).
+
+### Build installers yourself
 
 ```bash
-npm run build:desktop:mac
-npm run build:desktop:win
+npm run build:desktop:mac     # → apps/desktop/release/ (DMG + ZIP, arm64)
+npm run build:desktop:win     # → apps/desktop/release/ (NSIS + portable)
 ```
 
-## Configuration
+Upload artifacts from `apps/desktop/release/` to a [GitHub Release](https://github.com/ttsraja/wa-assistant-suite/releases/new).
+
+### Tests
+
+```bash
+npm run test:smoke    # engine boots on temp data dir
+npm test              # unit + API
+npm run test:all      # unit + API + UI contracts
+```
+
+---
+
+## Features at a glance
+
+| Area | What you get |
+| :--- | :--- |
+| **WhatsApp** | Link via QR; READY-only connected UI; full **Unlink / Re-pair** clears session safely |
+| **LLM** | Ollama · Gemini · Claude · OpenAI · Grok — one agent loop, vendor adapters isolated |
+| **Master Agent** | Reply ON/OFF · **Response tone** · dynamic context (“Busy until 6”) |
+| **Contacts** | Per-contact tone, info level, restricted topics, require-approval |
+| **Approvals** | Review / edit draft before send |
+| **Calendar & tasks** | Google OAuth, macOS Calendar/Reminders, Windows Outlook |
+| **Desktop** | Native shell, graphite dark theme, upgrade-safe `userData` |
+| **System** | Version, paths, durability, upgrade history |
+
+### Master Agent response tone
+
+Global style for every LLM provider (system-prompt based — no vendor lock-in):
+
+`auto` · `formal` · `casual` · `friendly` · `concise` · `tamil` · `tanglish`
+
+Per-contact policy tone still **overrides** the global default when set.
+
+### Architecture
+
+```text
+WhatsApp DM
+    → contact policy
+    → LLM draft (+ optional calendar/task tools)
+    → auto-send or approval queue
+    → conversation log + live dashboard
+```
+
+| Path | Role |
+| :--- | :--- |
+| `apps/core-engine` | Backend **:3001** — WhatsApp, REST/Socket.IO, Prisma/SQLite |
+| `apps/web-control-center` | Next.js UI — browser **:3000** or static export for desktop |
+| `apps/desktop` | Electron shell — engine + UI, portable data |
+| `version.json` | Product version / channel / productId |
+
+Agent & contributor deep-dive: **[AGENTS.md](./AGENTS.md)**.
+
+---
+
+## Configuration notes
 
 ### LLM (Settings → LLM)
 
 | Provider | Examples | Notes |
 | :--- | :--- | :--- |
-| `ollama` | `gemma4:latest` | Local; `localhost:11434` |
-| `gemini` | `gemini-2.0-flash`, `gemini-1.5-flash` | Real model ids |
-| `claude` | Anthropic catalog ids | API key |
-| `openai` | `gpt-4o-mini`, `gpt-4o` | Optional `baseUrl` |
+| `ollama` | `gemma4:latest`, `llama3.2` | Local · `localhost:11434` |
+| `gemini` | `gemini-2.0-flash` | API key from Google AI Studio |
+| `claude` | Anthropic model ids | API key |
+| `openai` | `gpt-4o-mini`, `gpt-4o` | Optional custom `baseUrl` |
 | `grok` | xAI models | Default `https://api.x.ai/v1` |
-
-Unified agent shape is Ollama-style; `llmProvider.js` adapts vendors.
 
 ### Google Calendar / Tasks
 
-Redirect URI:
+OAuth redirect URI:
 
-```
+```text
 http://localhost:3001/api/calendar/google-auth/callback
 ```
 
-Place `credentials.json` in the **data directory** (core-engine root in browser dev, or desktop `userData`), or set `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`. Then Settings → Re-authenticate Google.
+Place `credentials.json` in the **data directory** (engine root in browser mode, or desktop `userData`), or set `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET`. Then **Settings → Calendar → Re-authenticate Google**.
 
-### Policies & approvals
+### Privacy & data
 
-Configured in the control center; enforced by core-engine before WhatsApp send.
+- WhatsApp session, SQLite DB, policies, logs, and OAuth tokens stay **local**
+- No cloud backend is operated by this project
+- You are responsible for API keys and WhatsApp account use (follow Meta’s terms)
 
-### System & Updates
+### Ports
 
-Settings → **System & Updates**: version, schema, data paths, durability guarantees, upgrade history.
+| Service | Port |
+| :--- | :--- |
+| Web (Next dev) | `3000` |
+| Core engine | `3001` |
+
+---
 
 ## Scripts (root)
 
@@ -125,26 +264,66 @@ Settings → **System & Updates**: version, schema, data paths, durability guara
 | :--- | :--- |
 | `npm run dev` | Engine + web |
 | `npm run dev:engine` / `dev:web` | One app |
-| `npm run build:ui` | Static export → `apps/web-control-center/out` |
+| `npm run build:ui` | Static UI → `apps/web-control-center/out` |
 | `npm run dev:desktop` / `dev:desktop:fast` | Electron desktop |
-| `npm run build:desktop:mac` / `win` | Package desktop |
+| `npm run build:desktop:mac` / `win` | Package installers |
 | `npm run stop` / `restart` | Ports + WA Chromium |
-| `npm run db:push` / `prisma:generate` | SQLite / client |
-| `npm run setup:auth` | **Broken** — missing script file |
+| `npm run db:push` / `prisma:generate` | Package SQLite / Prisma client |
+| `npm test` / `test:unit` / `test:smoke` / `test:all` | Validation gate |
 
-## Not committed
-
-`.gitignore` excludes `node_modules`, `.next`, `out/`, `.wwebjs_auth`, `*.db`, `.env*`, OAuth tokens, `apps/desktop/release/`, `apps/desktop/.runtime/`, agent scratch.
-
-## Ports
-
-| Service | Port |
-| :--- | :--- |
-| Web (Next dev) | `3000` |
-| Core engine | `3001` |
+---
 
 ## Documentation
 
-- [`AGENTS.md`](./AGENTS.md) — architecture & commands (agents)
-- [`project summary.md`](./project%20summary.md) — technical overview
-- [`CLAUDE.md`](./CLAUDE.md) — Claude entrypoint → AGENTS
+| Doc | Role |
+| :--- | :--- |
+| **[AGENTS.md](./AGENTS.md)** | Source of truth — architecture, tone, Prisma, WA lifecycle, validation gate |
+| [CLAUDE.md](./CLAUDE.md) | Claude/agent entry → AGENTS |
+| [docs/TEST_MATRIX.md](./docs/TEST_MATRIX.md) | Pre-push test catalog |
+| [docs/UNIT_TESTS.md](./docs/UNIT_TESTS.md) | Unit edge-case inventory |
+| [project summary.md](./project%20summary.md) | Technical overview |
+| This README | Humans: download, run, configure |
+
+---
+
+## Contributing
+
+Issues and PRs are welcome.
+
+1. Fork → branch → keep changes focused  
+2. Run `npm run test:smoke` and `npm test` before opening a PR  
+3. Do not commit secrets, sessions, `*.db`, `out/`, or `release/`  
+4. See **AGENTS.md** for architecture constraints (especially WA re-pair and LLM provider boundaries)
+
+---
+
+## Roadmap / known gaps
+
+- [ ] Complete production pack pipeline (stage full engine `node_modules` into DMG/NSIS)
+- [ ] Optional code signing & notarization (macOS) / Authenticode (Windows)
+- [ ] Intel Mac / additional Windows arches as demand appears
+- [ ] Restore `setup:auth` helper script
+
+Star the repo and watch **Releases** for installer updates.
+
+---
+
+## Security
+
+- Report sensitive issues privately via GitHub Security Advisories if enabled, or open a minimal issue without secrets
+- Never paste WhatsApp session folders, `token.json`, or API keys into issues
+
+---
+
+## License
+
+[MIT](./LICENSE) © WA Assistant Suite contributors
+
+---
+
+<p align="center">
+  <sub>Built for people who live on WhatsApp but refuse to lose control of their time.</sub><br/>
+  <a href="https://github.com/ttsraja/wa-assistant-suite/releases/latest"><strong>Download latest release</strong></a>
+  ·
+  <a href="https://github.com/ttsraja/wa-assistant-suite"><strong>Star on GitHub</strong></a>
+</p>

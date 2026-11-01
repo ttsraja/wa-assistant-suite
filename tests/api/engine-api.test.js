@@ -69,6 +69,31 @@ describe('B — engine HTTP contract (no WhatsApp)', () => {
         });
     });
 
+    
+    it('B4b POST /api/state updates responseTone (Master Agent)', async () => {
+        const { ok, body } = await jsonFetch(engine.baseUrl, '/api/state', {
+            method: 'POST',
+            body: JSON.stringify({ responseTone: 'formal' }),
+        });
+        assert.equal(ok, true);
+        assert.equal(body.responseTone, 'formal');
+
+        const again = await jsonFetch(engine.baseUrl, '/api/state');
+        assert.equal(again.body.responseTone, 'formal');
+
+        const bad = await jsonFetch(engine.baseUrl, '/api/state', {
+            method: 'POST',
+            body: JSON.stringify({ responseTone: 'pirate-mode' }),
+        });
+        assert.equal(bad.ok, true);
+        assert.equal(bad.body.responseTone, 'auto');
+
+        await jsonFetch(engine.baseUrl, '/api/state', {
+            method: 'POST',
+            body: JSON.stringify({ responseTone: 'auto' }),
+        });
+    });
+
     it('B5 logs create requires fields; list works', async () => {
         const bad = await jsonFetch(engine.baseUrl, '/api/logs', {
             method: 'POST',
