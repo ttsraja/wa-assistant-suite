@@ -77,27 +77,185 @@ function createInitialBotState() {
 }
 
 
-function applyClientInfoToState(rt, { force = false } = {}) {
+/**
+ * Best-effort identity when wwebjs is CONNECTED but `client.info` / `ready` never arrived.
+ * Common on desktop when loading_screen hits 100% and state is CONNECTED while UI stays on LOADING.
+ */
+async function resolveWhatsAppIdentity(rt) {
+    const client = rt.client;
+    if (client?.info) {
+        return {
+            user: client.info.pushname || client.info.wid?.user || 'WhatsApp User',
+            phoneNumber: client.info.wid?.user || null,
+            platform: client.info.platform || null,
+            source: 'client.info',
+        };
+    }
+
+// Brief wait — info sometimes appears a beat after CONNECTED (keep short; /api/state polls often)
+    for (let i = 0; i < 3; i++) {
+        await new Promise((r) => setTimeout(r, 150));
+        if (client?.info) {
+            return {
+                user: client.info.pushname || client.info.wid?.user || 'WhatsApp User',
+                phoneNumber: client.info.wid?.user || null,
+                platform: client.info.platform || null,
+                source: 'client.info-delayed',
+            };
+        }
+    }
+
+    // Last resort: probe WhatsApp Web store via Puppeteer (best-effort; may fail across WA versions)
+    try {
+        const page = client?.pupPage;
+        if (page) {
+            const probe = await page.evaluate(() => {
+                try {
+                    const wid =
+                        window.Store?.Conn?.wid ||
+                        window.Store?.User?.getMeUser?.() ||
+                        window.Store?.Conn?.me ||
+                        null;
+                    const user =
+                        (wid && (wid.user || wid._serialized || wid)) ||
+                        window.Store?.Conn?.pushname ||
+                        null;
+                    const pushname =
+                        window.Store?.Conn?.pushname ||
+                        window.Store?.ContactMethods?.getCurrentUser?.()?.pushname ||
+                        null;
+                    const phone =
+                        typeof user === 'string'
+                            ? String(user).replace(/@.*/, '')
+                            : user?.user || null;
+                    return {
+                        pushname: pushname || (phone ? String(phone) : null),
+                        phone: phone ? String(phone) : null,
+                    };
+                } catch {
+                    return null;
+                }
+            });
+            if (probe?.phone || probe?.pushname) {
+                return {
+                    user: probe.pushname || probe.phone || 'WhatsApp User',
+                    phoneNumber: probe.phone || null,
+                    platform: null,
+                    source: 'puppeteer-store',
+                };
+            }
+        }
+    } catch (e) {
+        console.warn('WA identity probe notice:', e.message);
+    }
+
+    return {
+        user: 'WhatsApp User',
+        phoneNumber: null,
+        platform: null,
+        source: 'synthetic',
+    };
+}
+
+function applyClientInfoToState(rt, { force = false, identity = null } = {}) {
     const { client } = rt;
-    if (!client?.info) return false;
+    const hasInfo = Boolean(client?.info || identity);
+    if (!hasInfo && !force) return false;
+
     // During explicit re-pair, never promote to READY from stale client.info
-    // until WhatsApp emits ready after a fresh QR authentication.
+    // until WhatsApp emits ready after a fresh QR authentication — unless forced
+    // after we know the client is CONNECTED (see promoteConnectedToReady).
     if (rt.pairingInProgress && !force && !rt.pairingQrSeen) {
         return false;
     }
     if (rt.pairingInProgress && !force && !rt.pairingAuthenticated) {
         return false;
     }
+
+    const info = client?.info;
+    const user =
+        identity?.user ||
+        info?.pushname ||
+        info?.wid?.user ||
+        rt.botState.user ||
+        'WhatsApp User';
+    const phoneNumber =
+        identity?.phoneNumber ||
+        info?.wid?.user ||
+        rt.botState.phoneNumber ||
+        null;
+    const platform = identity?.platform || info?.platform || rt.botState.platform || null;
+
     rt.isReady = true;
     rt.pairingInProgress = false;
+    rt.pairingAuthenticated = false;
+    rt._connectedTicks = 0;
     rt.botState.qrCode = null;
     rt.botState.connectionStatus = 'READY';
     rt.botState.loadingProgress = 100;
-    rt.botState.user = client.info.pushname || client.info.wid?.user || 'Connected';
-    rt.botState.phoneNumber = client.info.wid?.user || null;
-    rt.botState.platform = client.info.platform || null;
+    rt.botState.user = user;
+    rt.botState.phoneNumber = phoneNumber;
+    rt.botState.platform = platform;
     rt.botState.error = null;
     return true;
+}
+
+/**
+ * If WhatsApp reports CONNECTED (and optionally loading 100%), promote UI to READY.
+ * Handles missed `ready` events which leave the dashboard stuck on "Syncing … 100%".
+ */
+async function promoteConnectedToReady(rt, { reason = 'promote' } = {}) {
+    if (!rt || rt.isReady || rt.isShuttingDown) return false;
+
+    // Still waiting for a fresh QR during re-pair
+    if (rt.pairingInProgress && !rt.pairingAuthenticated && !rt.pairingQrSeen) {
+        return false;
+    }
+    if (rt.pairingInProgress && rt.pairingQrSeen && !rt.pairingAuthenticated) {
+        return false;
+    }
+
+    let st = null;
+    try {
+        st = await rt.client.getState().catch(() => null);
+    } catch {
+        st = null;
+    }
+    if (st) rt.botState.waClientState = st;
+
+    const connected = st === 'CONNECTED';
+    const loadDone =
+        rt.botState.loadingProgress == null ||
+        Number(rt.botState.loadingProgress) >= 100 ||
+        rt.botState.connectionStatus === 'AUTHENTICATED' ||
+        rt.botState.connectionStatus === 'LOADING';
+
+    if (!connected) return false;
+
+    // Prefer real client.info; otherwise resolve identity and force READY when load looks done
+    // or we've seen CONNECTED for several watchdog ticks.
+    rt._connectedTicks = (rt._connectedTicks || 0) + 1;
+    const shouldForce =
+        Boolean(rt.client?.info) ||
+        rt._connectedTicks >= 3 ||
+        Number(rt.botState.loadingProgress) >= 100 ||
+        loadDone;
+
+    if (!shouldForce) return false;
+
+    const identity = await resolveWhatsAppIdentity(rt);
+    const ok = applyClientInfoToState(rt, { force: true, identity });
+    if (ok) {
+        console.log(
+            `🚀 WhatsApp READY (${reason}, identity=${identity.source}): ${rt.botState.user}` +
+                (rt.botState.phoneNumber ? ` (${rt.botState.phoneNumber})` : '')
+        );
+        try {
+            rt.io.emit('state', { ...rt.botState });
+        } catch { /* ignore */ }
+        stopReadyWatchdog(rt);
+    }
+    return ok;
 }
 
 function stopReadyWatchdog(rt) {
@@ -110,6 +268,7 @@ function stopReadyWatchdog(rt) {
 
 function resetBotConnectionFields(rt, status = 'INITIALIZING') {
     rt.isReady = false;
+    rt._connectedTicks = 0;
     rt.botState.connectionStatus = status;
     rt.botState.qrCode = null;
     rt.botState.user = null;
@@ -185,52 +344,84 @@ function startReadyWatchdog(rt) {
     // Do not watch for ready until a QR has been shown+authenticated during re-pair
     if (rt.pairingInProgress && !rt.pairingAuthenticated) return;
     let ticks = 0;
-    const maxTicks = 90; // ~90s
+    const maxTicks = 180; // ~3 min — desktop can sit at CONNECTED/100% without `ready`
+    let promoting = false;
     rt._readyWatchdog = setInterval(async () => {
         ticks += 1;
         if (rt.isShuttingDown || rt.isReady) {
             stopReadyWatchdog(rt);
             return;
         }
+        if (promoting) return;
         try {
+            // Keep SCAN_QR if we still have a live QR and are pairing
+            if (rt.botState.connectionStatus === 'SCAN_QR' && rt.botState.qrCode) {
+                return;
+            }
+
             if (applyClientInfoToState(rt)) {
-                rt.io.emit('state', rt.botState);
-                console.log(`🚀 WhatsApp ready (watchdog): ${rt.botState.user}`);
+                rt.io.emit('state', { ...rt.botState });
+                console.log(`🚀 WhatsApp ready (watchdog/info): ${rt.botState.user}`);
                 stopReadyWatchdog(rt);
                 return;
             }
+
             const st = await rt.client.getState().catch(() => null);
             if (st) {
                 rt.botState.waClientState = st;
-                if (st === 'CONNECTED' && rt.client.info && (!rt.pairingInProgress || rt.pairingAuthenticated)) {
-                    if (applyClientInfoToState(rt, { force: Boolean(rt.pairingAuthenticated) })) {
-                        rt.io.emit('state', rt.botState);
-                        stopReadyWatchdog(rt);
-                        return;
+                if (['OPENING', 'PAIRING', 'TIMEOUT', 'CONNECTED'].includes(st)) {
+                    if (
+                        rt.botState.connectionStatus === 'INITIALIZING' ||
+                        rt.botState.connectionStatus === 'AUTHENTICATED'
+                    ) {
+                        rt.botState.connectionStatus = 'LOADING';
+                        if (st === 'CONNECTED' && rt.botState.loadingProgress == null) {
+                            rt.botState.loadingProgress = 100;
+                        }
+                        rt.io.emit('state', { ...rt.botState });
                     }
                 }
-                // Keep SCAN_QR if we still have a live QR and are pairing
-                if (rt.botState.connectionStatus === 'SCAN_QR' && rt.botState.qrCode) {
-                    return;
-                }
-                if (['OPENING', 'PAIRING', 'TIMEOUT'].includes(st) || st === 'CONNECTED') {
-                    if (rt.botState.connectionStatus === 'INITIALIZING') {
-                        rt.botState.connectionStatus = 'LOADING';
-                        rt.io.emit('state', { ...rt.botState });
+
+                if (st === 'CONNECTED') {
+                    promoting = true;
+                    try {
+                        const ok = await promoteConnectedToReady(rt, { reason: 'watchdog' });
+                        if (ok) return;
+                    } finally {
+                        promoting = false;
                     }
                 }
             }
         } catch (e) {
             /* ignore transient */
         }
-        if (ticks >= maxTicks) {
-            console.warn('⚠️ Ready watchdog timed out — still waiting for WhatsApp ready event');
-            if (!rt.isReady && rt.botState.connectionStatus === 'AUTHENTICATED') {
-                rt.botState.connectionStatus = 'LOADING';
-                rt.botState.error = 'Taking longer than usual to finish WhatsApp handshake. Keep the app open.';
-                rt.io.emit('state', rt.botState);
+        if (ticks >= maxTicks && !rt.isReady) {
+            console.warn(
+                '⚠️ Ready watchdog timed out — forcing READY check while CONNECTED/LOADING if possible'
+            );
+            promoting = true;
+            try {
+                const st = await rt.client.getState().catch(() => null);
+                if (st === 'CONNECTED') {
+                    const ok = await promoteConnectedToReady(rt, { reason: 'watchdog-timeout' });
+                    if (ok) return;
+                }
+                if (!rt.isReady) {
+                    rt.botState.error =
+                        'WhatsApp stayed on syncing longer than expected. Try Unlink / Re-pair, or restart the app.';
+                    rt.io.emit('state', { ...rt.botState });
+                }
+            } finally {
+                promoting = false;
+                // Keep polling a bit longer only if still not ready — restart interval lightly
+                stopReadyWatchdog(rt);
+                if (!rt.isReady && !rt.isShuttingDown) {
+                    // one more delayed attempt after timeout
+                    setTimeout(() => {
+                        if (!rt.isReady && !rt.isShuttingDown) startReadyWatchdog(rt);
+                    }, 5000);
+                }
             }
-            stopReadyWatchdog(rt);
         }
     }, 1000);
 }
@@ -291,7 +482,7 @@ function attachWhatsAppHandlers(rt) {
         io.emit('state', rt.botState);
     });
 
-    client.on('loading_screen', (percent, message) => {
+client.on('loading_screen', (percent, message) => {
         console.log(`⏳ Loading WhatsApp Web: ${percent}% - ${message}`);
         rt.botState.loadingProgress = percent;
         // Never steal the QR screen — loading after scan is fine, but keep SCAN_QR
@@ -305,6 +496,13 @@ function attachWhatsAppHandlers(rt) {
                 rt.botState.connectionStatus = 'LOADING';
             }
             io.emit('state', { ...rt.botState });
+            // At 100% the `ready` event is sometimes missed — start/keep watchdog
+            if (Number(percent) >= 100) {
+                startReadyWatchdog(rt);
+                setTimeout(() => {
+                    promoteConnectedToReady(rt, { reason: 'loading-100' }).catch(() => {});
+                }, 500);
+            }
         }
     });
 
@@ -320,15 +518,26 @@ function attachWhatsAppHandlers(rt) {
         io.emit('state', rt.botState);
     });
 
-    client.on('change_state', (state) => {
+client.on('change_state', (state) => {
         console.log('📡 WhatsApp state:', state);
         rt.botState.waClientState = state;
         if (state === 'CONNECTED' && (!rt.pairingInProgress || rt.pairingAuthenticated)) {
             startReadyWatchdog(rt);
+            // Don't wait forever for `ready` if already CONNECTED
+            setTimeout(() => {
+                promoteConnectedToReady(rt, { reason: 'change_state-CONNECTED' }).catch(() => {});
+            }, 750);
         }
         if (!rt.isReady && state && state !== 'CONFLICT') {
-            if (rt.botState.connectionStatus === 'INITIALIZING' && !(rt.botState.qrCode)) {
+            if (
+                (rt.botState.connectionStatus === 'INITIALIZING' ||
+                    rt.botState.connectionStatus === 'AUTHENTICATED') &&
+                !(rt.botState.qrCode)
+            ) {
                 rt.botState.connectionStatus = 'LOADING';
+                if (state === 'CONNECTED' && rt.botState.loadingProgress == null) {
+                    rt.botState.loadingProgress = 100;
+                }
             }
         }
         // Preserve QR payload on emit
@@ -337,7 +546,7 @@ function attachWhatsAppHandlers(rt) {
 
     client.on('ready', () => {
         applyClientInfoToState(rt, { force: true });
-        io.emit('state', rt.botState);
+        io.emit('state', { ...rt.botState });
         stopReadyWatchdog(rt);
         console.log(
             `🚀 WhatsApp Engine Connected and Ready! Logged in as: ${rt.botState.user} (${rt.botState.phoneNumber})`
@@ -377,7 +586,7 @@ function attachHttpRoutes(rt) {
     const { app, io } = rt;
     const clientRef = () => rt.client;
 
-    app.get('/api/state', async (req, res) => {
+app.get('/api/state', async (req, res) => {
         try {
             // Never clobber an active QR / pairing flow from polling
             if (rt.botState.connectionStatus === 'SCAN_QR' && rt.botState.qrCode) {
@@ -391,6 +600,8 @@ function attachHttpRoutes(rt) {
                 if (st) rt.botState.waClientState = st;
                 if (st === 'CONNECTED' && (!rt.pairingInProgress || rt.pairingAuthenticated)) {
                     startReadyWatchdog(rt);
+                    // UI polls every ~2.5s — use that to unstick LOADING @ 100% + CONNECTED
+                    await promoteConnectedToReady(rt, { reason: 'api-state-poll' });
                 }
             }
         } catch { /* ignore */ }
