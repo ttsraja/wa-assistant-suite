@@ -50,6 +50,19 @@
 
 Prebuilt installers are published on **GitHub Releases**. Prefer the **[latest release](https://github.com/ttsraja/wa-assistant-suite/releases/latest)**.
 
+> ### ⚠️ Caution — unsigned desktop builds (read before installing)
+>
+> Current GitHub Release installers are **not yet code-signed or notarized**. That is temporary and **will be fixed after the project’s [Apple Developer](https://developer.apple.com) account is set up** (macOS signing + notarization), with the same class of fix planned for **Windows** (Authenticode / trusted publisher certificate).
+>
+> **This does not mean the download is corrupt.** macOS and Windows are blocking “unknown developer” apps from the internet. Until official signing lands, use the platform steps below once, then the app opens normally.
+>
+> | Platform | What you may see | What to do |
+> | :--- | :--- | :--- |
+> | **macOS** | *“… is damaged and can’t be opened”* or *developer cannot be verified* | Clear quarantine (recommended) or **Open Anyway** — see [macOS install](#macos-apple-silicon) |
+> | **Windows** | SmartScreen: *“Windows protected your PC”* / unknown publisher | **More info → Run anyway** — see [Windows install](#windows-x64) |
+>
+> Prefer **[Run from source](#run-from-source-developers)** if your organization blocks unsigned apps entirely.
+
 ### macOS (Apple Silicon)
 
 | File | Release asset name | Link |
@@ -60,7 +73,21 @@ Prebuilt installers are published on **GitHub Releases**. Prefer the **[latest r
 **Install**
 
 1. Open the DMG (or unzip) and drag **WA Assistant Suite** to **Applications**.
-2. First launch: if Gatekeeper blocks an unsigned build, right-click → **Open** → confirm (or allow under *System Settings → Privacy & Security*).
+2. **First launch (unsigned build — important):** macOS may say the app is **damaged** or from an **unidentified developer**. That is Gatekeeper, not a bad file. Fix it once:
+
+   **Recommended — clear quarantine in Terminal:**
+
+   ```bash
+   xattr -cr "/Applications/WA Assistant Suite.app"
+   ```
+
+   Then open the app again from Applications.
+
+   **Or** right-click the app → **Open** → confirm **Open**.  
+   **Or** *System Settings → Privacy & Security* → **Open Anyway**.
+
+   > After an **Apple Developer** account is in place, builds will be **signed and notarized** so these steps are no longer required.
+
 3. Link WhatsApp: phone → **Settings → Linked devices → Link a device** → scan the QR in the app.
 4. Pick an LLM in **Settings → LLM** (Ollama local or a cloud API key).
 
@@ -78,8 +105,15 @@ Prebuilt installers are published on **GitHub Releases**. Prefer the **[latest r
 **Install**
 
 1. Run the Setup EXE (or launch the portable build).
-2. Allow Windows SmartScreen if prompted for an unsigned build (*More info → Run anyway*).
-3. Scan the WhatsApp QR and configure your LLM as on macOS.
+2. **First launch (unsigned build — important):** Windows SmartScreen may show *“Windows protected your PC”* or warn about an **unknown publisher**. That is normal until the installer is **Authenticode-signed**.
+
+   - Click **More info**
+   - Click **Run anyway**
+
+   > Same roadmap as macOS: once a Windows code-signing certificate is configured, SmartScreen warnings should stop (or become rare as reputation builds).
+
+3. If Windows Defender or another AV quarantines the file, restore it from the protection history (false positive risk is higher for new unsigned Electron apps) or use **[Run from source](#run-from-source-developers)**.
+4. Scan the WhatsApp QR and configure your LLM as on macOS.
 
 **Data location (Windows):**  
 `%APPDATA%\WA Assistant Suite\`
@@ -107,10 +141,12 @@ Or open the [latest release](https://github.com/ttsraja/wa-assistant-suite/relea
 
 | Note | Detail |
 | :--- | :--- |
-| **Unsigned builds** | Community/dev releases may not be Apple-notarized or Windows-signed. Use the “Open anyway” path above. |
-| **Exact filenames** | GitHub Release assets use dotted names (e.g. `WA.Assistant.Suite-1.0.0-arm64.dmg`). Source code archives (`Source code (zip)` / `tar.gz`) are also on the release page for cloning without git. If a link 404s, open the [Releases page](https://github.com/ttsraja/wa-assistant-suite/releases/latest). |
-| **Packaging status** | Production installers still need a complete engine dependency stage for fully offline packaged runs. If a release build fails to start the engine, use **[Run from source](#run-from-source-developers)** or `npm run dev:desktop:fast` — that path is fully supported today. |
-| **Publishing** | Maintainers: build with `npm run build:desktop:mac` / `build:desktop:win`, then upload artifacts from `apps/desktop/release/` to a GitHub Release tagged `v1.0.0` (or the next version). |
+| **Unsigned builds (temporary)** | macOS is not Apple-signed/notarized yet; Windows is not Authenticode-signed yet. See the [caution](#download-desktop-app) and install steps. **Planned fix:** Apple Developer account → Developer ID + notarization; Windows code-signing cert → signed Setup/Portable. |
+| **“Damaged” on macOS** | Almost always quarantine/Gatekeeper — run `xattr -cr "/Applications/WA Assistant Suite.app"`, not a re-download. |
+| **SmartScreen on Windows** | **More info → Run anyway** until signed releases ship. |
+| **Exact filenames** | GitHub Release assets use dotted names (e.g. `WA.Assistant.Suite-1.0.0-arm64.dmg`). Source code archives (`Source code (zip)` / `tar.gz`) are also on the release page. If a link 404s, open the [Releases page](https://github.com/ttsraja/wa-assistant-suite/releases/latest). |
+| **Packaging status** | Production installers still need a complete engine dependency stage for fully offline packaged runs. If a release build fails to start the engine, use **[Run from source](#run-from-source-developers)** or `npm run dev:desktop:fast`. |
+| **Publishing** | Maintainers: `npm run build:desktop:mac` / `build:desktop:win`, upload from `apps/desktop/release/` to a GitHub Release (e.g. `v1.0.0`). |
 
 ---
 
@@ -311,7 +347,8 @@ Issues and PRs are welcome.
 ## Roadmap / known gaps
 
 - [ ] Complete production pack pipeline (stage full engine `node_modules` into DMG/NSIS)
-- [ ] Optional code signing & notarization (macOS) / Authenticode (Windows)
+- [ ] **macOS:** Apple Developer account → Developer ID signing + notarization (removes “damaged” / Gatekeeper prompts)
+- [ ] **Windows:** Authenticode code-signing certificate (removes SmartScreen “unknown publisher” for most users)
 - [ ] Intel Mac / additional Windows arches as demand appears
 - [ ] Restore `setup:auth` helper script
 
