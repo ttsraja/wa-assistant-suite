@@ -6,16 +6,16 @@
 
 <p align="center">
   <a href="https://github.com/ttsraja/wa-assistant-suite/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/ttsraja/wa-assistant-suite?style=for-the-badge&label=Release&color=1c1c1e"></a>
-  <a href="#-download-desktop-app"><img alt="macOS" src="https://img.shields.io/badge/macOS-DMG%20%2F%20ZIP-000000?style=for-the-badge&logo=apple&logoColor=white"></a>
-  <a href="#-download-desktop-app"><img alt="Windows" src="https://img.shields.io/badge/Windows-NSIS%20%2F%20Portable-0078D4?style=for-the-badge&logo=windows&logoColor=white"></a>
+  <a href="#download-desktop-app"><img alt="macOS" src="https://img.shields.io/badge/macOS-DMG%20%2F%20ZIP-000000?style=for-the-badge&logo=apple&logoColor=white"></a>
+  <a href="#download-desktop-app"><img alt="Windows" src="https://img.shields.io/badge/Windows-NSIS%20%2F%20Portable-0078D4?style=for-the-badge&logo=windows&logoColor=white"></a>
   <a href="LICENSE"><img alt="License MIT" src="https://img.shields.io/badge/License-MIT-22c55e?style=for-the-badge"></a>
-  <a href="#-run-from-source-developers"><img alt="Node" src="https://img.shields.io/badge/Node.js-LTS-339933?style=for-the-badge&logo=nodedotjs&logoColor=white"></a>
+  <a href="#run-from-source-developers"><img alt="Node" src="https://img.shields.io/badge/Node.js-LTS-339933?style=for-the-badge&logo=nodedotjs&logoColor=white"></a>
 </p>
 
 <p align="center">
-  <strong><a href="#-download-desktop-app">Download the app</a></strong>
+  <strong><a href="#download-desktop-app">Download the app</a></strong>
   &nbsp;·&nbsp;
-  <strong><a href="#-run-from-source-developers">Clone &amp; run from source</a></strong>
+  <strong><a href="#run-from-source-developers">Clone &amp; run from source</a></strong>
   &nbsp;·&nbsp;
   <strong><a href="https://github.com/ttsraja/wa-assistant-suite/releases">All releases</a></strong>
 </p>
@@ -41,8 +41,8 @@
 
 | Path | Best for | Time |
 | :--- | :--- | :--- |
-| **[Desktop app](#-download-desktop-app)** | Try the product as a standalone Mac/Windows app | ~5 minutes |
-| **[From source](#-run-from-source-developers)** | Develop, customize, or run the full monorepo | ~10–15 minutes |
+| **[Desktop app](#download-desktop-app)** | Try the product as a standalone Mac/Windows app | ~5 minutes |
+| **[From source](#run-from-source-developers)** | Develop, customize, or run the full monorepo | ~10–15 minutes |
 
 ---
 
@@ -52,10 +52,10 @@ Prebuilt installers are published on **GitHub Releases**. Prefer the **[latest r
 
 ### macOS (Apple Silicon)
 
-| File | Artifact (upload to Releases) | Link |
+| File | Release asset name | Link |
 | :--- | :--- | :--- |
-| **DMG installer** (recommended) | `WA Assistant Suite-1.0.0-arm64.dmg` | [Download macOS DMG](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA%20Assistant%20Suite-1.0.0-arm64.dmg) |
-| **ZIP** (drag to Applications) | `WA Assistant Suite-1.0.0-arm64-mac.zip` | [Download macOS ZIP](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA%20Assistant%20Suite-1.0.0-arm64-mac.zip) |
+| **DMG installer** (recommended) | `WA.Assistant.Suite-1.0.0-arm64.dmg` | [Download macOS DMG](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA.Assistant.Suite-1.0.0-arm64.dmg) |
+| **ZIP** (drag to Applications) | `WA.Assistant.Suite-1.0.0-arm64-mac.zip` | [Download macOS ZIP](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA.Assistant.Suite-1.0.0-arm64-mac.zip) |
 
 **Install**
 
@@ -70,10 +70,10 @@ Prebuilt installers are published on **GitHub Releases**. Prefer the **[latest r
 
 ### Windows (x64)
 
-| File | Artifact (upload to Releases) | Link |
+| File | Release asset name | Link |
 | :--- | :--- | :--- |
-| **NSIS installer** (recommended) | `WA Assistant Suite Setup 1.0.0.exe` | [Download Windows Setup](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA%20Assistant%20Suite%20Setup%201.0.0.exe) |
-| **Portable** (no install) | `WA Assistant Suite 1.0.0.exe` | [Download Windows Portable](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA%20Assistant%20Suite%201.0.0.exe) |
+| **NSIS installer** (recommended) | `WA.Assistant.Suite.Setup.1.0.0.exe` | [Download Windows Setup](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA.Assistant.Suite.Setup.1.0.0.exe) |
+| **Portable** (no install) | `WA.Assistant.Suite.1.0.0.exe` | [Download Windows Portable](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA.Assistant.Suite.1.0.0.exe) |
 
 **Install**
 
@@ -83,6 +83,17 @@ Prebuilt installers are published on **GitHub Releases**. Prefer the **[latest r
 
 **Data location (Windows):**  
 `%APPDATA%\WA Assistant Suite\`
+
+### Source code archives
+
+Same as cloning the release tag (no installer):
+
+| Archive | Link |
+| :--- | :--- |
+| **Source code (zip)** | [Download source zip](https://github.com/ttsraja/wa-assistant-suite/archive/refs/tags/v1.0.0.zip) |
+| **Source code (tar.gz)** | [Download source tar.gz](https://github.com/ttsraja/wa-assistant-suite/archive/refs/tags/v1.0.0.tar.gz) |
+
+Or open the [latest release](https://github.com/ttsraja/wa-assistant-suite/releases/latest) and use the *Source code* assets listed there.
 
 ### Requirements (desktop)
 
@@ -97,8 +108,8 @@ Prebuilt installers are published on **GitHub Releases**. Prefer the **[latest r
 | Note | Detail |
 | :--- | :--- |
 | **Unsigned builds** | Community/dev releases may not be Apple-notarized or Windows-signed. Use the “Open anyway” path above. |
-| **Exact filenames** | electron-builder may encode spaces as `.` in asset names. If a direct link 404s, open the [Releases page](https://github.com/ttsraja/wa-assistant-suite/releases/latest) and download the listed **dmg / zip / exe**. |
-| **Packaging status** | Production installers still need a complete engine dependency stage for fully offline packaged runs. If a release build fails to start the engine, use **[Run from source](#-run-from-source-developers)** or `npm run dev:desktop:fast` — that path is fully supported today. |
+| **Exact filenames** | GitHub Release assets use dotted names (e.g. `WA.Assistant.Suite-1.0.0-arm64.dmg`). Source code archives (`Source code (zip)` / `tar.gz`) are also on the release page for cloning without git. If a link 404s, open the [Releases page](https://github.com/ttsraja/wa-assistant-suite/releases/latest). |
+| **Packaging status** | Production installers still need a complete engine dependency stage for fully offline packaged runs. If a release build fails to start the engine, use **[Run from source](#run-from-source-developers)** or `npm run dev:desktop:fast` — that path is fully supported today. |
 | **Publishing** | Maintainers: build with `npm run build:desktop:mac` / `build:desktop:win`, then upload artifacts from `apps/desktop/release/` to a GitHub Release tagged `v1.0.0` (or the next version). |
 
 ---
