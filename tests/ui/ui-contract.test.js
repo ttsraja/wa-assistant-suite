@@ -49,8 +49,11 @@ describe('T3 UI contract (source + optional export)', () => {
         assert.match(src, /RESPONSE_TONE_OPTIONS/);
         const modeIdx = src.indexOf('Autonomous Reply Mode');
         const toneIdx = src.indexOf('Response Tone');
+        const ownerIdx = src.indexOf('Owner Name');
         const ctxIdx = src.indexOf('Dynamic Prompt Context');
-        assert.ok(modeIdx >= 0 && toneIdx > modeIdx && ctxIdx > toneIdx);
+        assert.ok(modeIdx >= 0 && toneIdx > modeIdx && ownerIdx > toneIdx && ctxIdx > ownerIdx);
+        assert.match(src, /ownerName/);
+        assert.match(src, /handleSaveOwnerName/);
     });
 
 it('H12 static export exists when built (soft if missing)', () => {

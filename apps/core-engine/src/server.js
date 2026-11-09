@@ -66,6 +66,7 @@ function createInitialBotState() {
         status: 'ON',
         customContext: 'Busy at work',
         responseTone: 'auto',
+        ownerName: '',
         qrCode: null,
         connectionStatus: 'INITIALIZING',
         loadingProgress: null,
@@ -74,6 +75,34 @@ function createInitialBotState() {
         platform: null,
         error: null,
     };
+}
+
+/**
+ * If Config.ownerName is empty, seed from linked WhatsApp pushname (first token).
+ * Persists once so the control center can edit it afterward.
+ */
+function maybeSeedOwnerNameFromWhatsApp(rt) {
+    const current = String(rt.botState.ownerName || '').trim();
+    if (current) return false;
+    const waUser = String(rt.botState.user || '').trim();
+    if (!waUser || waUser === 'WhatsApp User') return false;
+    const first = waUser.split(/\s+/)[0];
+    if (!first) return false;
+    rt.botState.ownerName = first;
+    prisma.config
+        .upsert({
+            where: { id: 1 },
+            create: {
+                id: 1,
+                status: rt.botState.status || 'ON',
+                customContext: rt.botState.customContext ?? 'Busy at work',
+                responseTone: normalizeResponseTone(rt.botState.responseTone || 'auto'),
+                ownerName: first,
+            },
+            update: { ownerName: first },
+        })
+        .catch((e) => console.warn('ownerName seed notice:', e.message));
+    return true;
 }
 
 
@@ -197,6 +226,7 @@ function applyClientInfoToState(rt, { force = false, identity = null } = {}) {
     rt.botState.phoneNumber = phoneNumber;
     rt.botState.platform = platform;
     rt.botState.error = null;
+    maybeSeedOwnerNameFromWhatsApp(rt);
     return true;
 }
 
@@ -431,12 +461,13 @@ async function syncConfig(rt) {
         let conf = await prisma.config.findUnique({ where: { id: 1 } });
         if (!conf) {
             conf = await prisma.config.create({
-                data: { id: 1, status: 'ON', customContext: 'Busy at work', responseTone: 'auto' },
+                data: { id: 1, status: 'ON', customContext: 'Busy at work', responseTone: 'auto', ownerName: '' },
             });
         }
         rt.botState.status = conf.status;
         rt.botState.customContext = conf.customContext;
         rt.botState.responseTone = normalizeResponseTone(conf.responseTone ?? 'auto');
+        rt.botState.ownerName = String(conf.ownerName ?? '').trim();
     });
 }
 
@@ -619,11 +650,12 @@ app.get('/api/state', async (req, res) => {
     });
 
 app.post('/api/state', async (req, res) => {
-        const { status, customContext, responseTone } = req.body;
+        const { status, customContext, responseTone, ownerName } = req.body;
         const updateData = {};
         if (status !== undefined) updateData.status = status;
         if (customContext !== undefined) updateData.customContext = customContext;
         if (responseTone !== undefined) updateData.responseTone = normalizeResponseTone(responseTone);
+        if (ownerName !== undefined) updateData.ownerName = String(ownerName || '').trim();
         // Ensure Config row exists (fresh data dirs)
         const existing = await prisma.config.findUnique({ where: { id: 1 } });
         if (!existing) {
@@ -633,6 +665,7 @@ app.post('/api/state', async (req, res) => {
                     status: updateData.status || 'ON',
                     customContext: updateData.customContext ?? 'Busy at work',
                     responseTone: updateData.responseTone || 'auto',
+                    ownerName: updateData.ownerName ?? '',
                 },
             });
         } else if (Object.keys(updateData).length > 0) {
@@ -640,6 +673,7 @@ app.post('/api/state', async (req, res) => {
         }
         rt.botState = { ...rt.botState, ...updateData };
         if (updateData.responseTone) rt.botState.responseTone = updateData.responseTone;
+        if (updateData.ownerName !== undefined) rt.botState.ownerName = updateData.ownerName;
         io.emit('state', rt.botState);
         res.json(rt.botState);
     });

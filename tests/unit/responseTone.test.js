@@ -13,7 +13,7 @@ const {
     buildGlobalToneOverlay,
     contactToneOverridesGlobal,
 } = await import(toneUrl);
-const { buildSystemPrompt } = await import(agentUrl);
+const { buildSystemPrompt, resolveOwnerName } = await import(agentUrl);
 
 describe('Master Agent responseTone helpers', () => {
     it('exposes the canonical tone list', () => {
@@ -72,12 +72,27 @@ describe('buildSystemPrompt includes global tone for all vendors (text-only)', (
     });
 
     it('formal tone injects global block and keeps tool/calendar rules', () => {
-        const p = buildSystemPrompt('Sam', 'Busy', '', 'formal');
+        const p = buildSystemPrompt('Sam', 'Busy', '', 'formal', 'Alex');
         assert.match(p, /GLOBAL RESPONSE TONE/);
         assert.match(p, /formal|professional/i);
         assert.match(p, /getUpcomingSchedule/);
         assert.match(p, /recordUserNote/);
-        assert.match(p, /NOT Thanga/);
+        assert.match(p, /NOT Alex/);
+        assert.doesNotMatch(p, /Thanga/);
+    });
+
+    it('resolveOwnerName prefers config then WhatsApp pushname', () => {
+        assert.equal(resolveOwnerName({ ownerName: 'Priya', user: 'Other' }), 'Priya');
+        assert.equal(resolveOwnerName({ ownerName: '  ', user: 'Raja Kumar' }), 'Raja');
+        assert.equal(resolveOwnerName({ ownerName: '', user: 'WhatsApp User' }), 'the owner');
+        assert.equal(resolveOwnerName(null), 'the owner');
+    });
+
+    it('buildSystemPrompt uses owner name instead of hardcoded Thanga', () => {
+        const p = buildSystemPrompt('Sam', 'Busy', '', 'auto', 'Jordan');
+        assert.match(p, /Jordan's intelligent/);
+        assert.match(p, /NOT Jordan/);
+        assert.doesNotMatch(p, /Thanga/);
     });
 
     it('tamil tone adjusts language rule', () => {

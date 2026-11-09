@@ -45,6 +45,7 @@ const [state, setState] = useState({
         status: "ON",
         customContext: "",
         responseTone: "auto",
+        ownerName: "",
         qrCode: null,
         connectionStatus: "INITIALIZING",
         loadingProgress: null,
@@ -54,6 +55,7 @@ const [state, setState] = useState({
     });
     const [logs, setLogs] = useState([]);
     const [contextInput, setContextInput] = useState("");
+    const [ownerNameInput, setOwnerNameInput] = useState("");
     const [isSaving, setIsSaving] = useState(false);
     const [engineOnline, setEngineOnline] = useState(true);
     const socketRef = useRef(null);
@@ -176,6 +178,7 @@ const [state, setState] = useState({
                 if (isMounted) {
                     setState((prev) => ({ ...prev, ...data }));
                     if (data.customContext !== undefined) setContextInput(data.customContext);
+                    if (data.ownerName !== undefined) setOwnerNameInput(data.ownerName || "");
                     setEngineOnline(true);
                 }
             } catch {
@@ -218,6 +221,9 @@ const [state, setState] = useState({
             setState(newState);
             if (newState.customContext !== undefined) {
                 setContextInput(newState.customContext);
+            }
+            if (newState.ownerName !== undefined) {
+                setOwnerNameInput(newState.ownerName || "");
             }
         });
 
@@ -266,6 +272,8 @@ const [state, setState] = useState({
             });
             const data = await res.json();
             setState(data);
+            if (data.customContext !== undefined) setContextInput(data.customContext);
+            if (data.ownerName !== undefined) setOwnerNameInput(data.ownerName || "");
         } catch (e) {
             console.error("Error updating state", e);
         } finally {
@@ -275,6 +283,10 @@ const [state, setState] = useState({
 
     const handleSaveContext = () => {
         updateState({ customContext: contextInput });
+    };
+
+    const handleSaveOwnerName = () => {
+        updateState({ ownerName: ownerNameInput.trim() });
     };
 
     const handleLogout = async () => {
@@ -495,6 +507,27 @@ const [state, setState] = useState({
                         <div className="form-hint">
                             Default style for all replies across Ollama, Gemini, Claude, OpenAI, and Grok.
                             Per-contact policy tone (Settings → Contacts) overrides this when set.
+                        </div>
+                    </div>
+
+                    <div className="form-group">
+                        <label className="form-label">Owner Name</label>
+                        <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                            <input
+                                type="text"
+                                value={ownerNameInput}
+                                onChange={(e) => setOwnerNameInput(e.target.value)}
+                                className="custom-select"
+                                style={{ flex: 1, minWidth: 160 }}
+                                placeholder={state.user ? String(state.user).split(" ")[0] : "e.g. Alex"}
+                                disabled={isSaving}
+                            />
+                            <button type="button" onClick={handleSaveOwnerName} disabled={isSaving} className="btn-primary">
+                                {isSaving ? "Saving..." : "Save Name"}
+                            </button>
+                        </div>
+                        <div className="form-hint">
+                            Name used in AI prompts (e.g. Alex&apos;s assistant). Defaults from the linked WhatsApp account name; edit anytime.
                         </div>
                     </div>
 
