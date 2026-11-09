@@ -223,27 +223,27 @@ async function promoteConnectedToReady(rt, { reason = 'promote' } = {}) {
     }
     if (st) rt.botState.waClientState = st;
 
-    const connected = st === 'CONNECTED';
-    const loadDone =
-        rt.botState.loadingProgress == null ||
-        Number(rt.botState.loadingProgress) >= 100 ||
-        rt.botState.connectionStatus === 'AUTHENTICATED' ||
-        rt.botState.connectionStatus === 'LOADING';
-
+const connected = st === 'CONNECTED';
     if (!connected) return false;
 
-    // Prefer real client.info; otherwise resolve identity and force READY when load looks done
-    // or we've seen CONNECTED for several watchdog ticks.
     rt._connectedTicks = (rt._connectedTicks || 0) + 1;
-    const shouldForce =
-        Boolean(rt.client?.info) ||
-        rt._connectedTicks >= 3 ||
-        Number(rt.botState.loadingProgress) >= 100 ||
-        loadDone;
+    const progress = Number(rt.botState.loadingProgress);
+    const loadComplete = Number.isFinite(progress) && progress >= 100;
+    // Never treat mere LOADING status as "done" — that caused READY at 0–30% with synthetic user.
+    const hasClientInfo = Boolean(rt.client?.info);
+    // After several CONNECTED ticks with no further load progress, allow promotion (missed ready).
+    const stalledConnected =
+        rt._connectedTicks >= 8 &&
+        (loadComplete || !Number.isFinite(progress) || progress >= 90);
 
+    const shouldForce = hasClientInfo || loadComplete || stalledConnected;
     if (!shouldForce) return false;
 
     const identity = await resolveWhatsAppIdentity(rt);
+    // Prefer real identity; only accept synthetic after stall/load-complete
+    if (identity.source === 'synthetic' && !loadComplete && !stalledConnected && !hasClientInfo) {
+        return false;
+    }
     const ok = applyClientInfoToState(rt, { force: true, identity });
     if (ok) {
         console.log(

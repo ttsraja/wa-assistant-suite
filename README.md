@@ -67,7 +67,6 @@ Prebuilt installers are published on **GitHub Releases**. Prefer the **[latest r
 
 | File | Release asset name | Link |
 | :--- | :--- | :--- |
-| **DMG installer** (recommended) | `WA.Assistant.Suite-1.0.0-arm64.dmg` | [Download macOS DMG](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA.Assistant.Suite-1.0.0-arm64.dmg) |
 | **ZIP** (drag to Applications) | `WA.Assistant.Suite-1.0.0-arm64-mac.zip` | [Download macOS ZIP](https://github.com/ttsraja/wa-assistant-suite/releases/latest/download/WA.Assistant.Suite-1.0.0-arm64-mac.zip) |
 
 **Install**
