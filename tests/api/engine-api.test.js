@@ -94,6 +94,23 @@ describe('B — engine HTTP contract (no WhatsApp)', () => {
         });
     });
 
+    it('B4c POST /api/state updates ownerName (Master Agent)', async () => {
+        const { ok, body } = await jsonFetch(engine.baseUrl, '/api/state', {
+            method: 'POST',
+            body: JSON.stringify({ ownerName: '  Jordan  ' }),
+        });
+        assert.equal(ok, true);
+        assert.equal(body.ownerName, 'Jordan');
+
+        const again = await jsonFetch(engine.baseUrl, '/api/state');
+        assert.equal(again.body.ownerName, 'Jordan');
+
+        await jsonFetch(engine.baseUrl, '/api/state', {
+            method: 'POST',
+            body: JSON.stringify({ ownerName: '' }),
+        });
+    });
+
     it('B5 logs create requires fields; list works', async () => {
         const bad = await jsonFetch(engine.baseUrl, '/api/logs', {
             method: 'POST',

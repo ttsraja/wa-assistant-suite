@@ -9,40 +9,62 @@ const conversationContext = new Map();
 // Maps approvalId → { msg, userId } so the server can send approved messages
 export const pendingDispatch = new Map();
 
+const FALLBACK_OWNER_NAME = 'the owner';
+
+/**
+ * Resolve the account-owner display name used in prompts/replies.
+ * Prefer Config.ownerName; else first token of linked WhatsApp pushname.
+ * @param {{ ownerName?: string|null, user?: string|null } | null | undefined} botState
+ */
+export function resolveOwnerName(botState) {
+    const configured = String(botState?.ownerName || '').trim();
+    if (configured) return configured;
+    const waUser = String(botState?.user || '').trim();
+    if (waUser && waUser !== 'WhatsApp User') {
+        const first = waUser.split(/\s+/)[0];
+        if (first) return first;
+    }
+    return FALLBACK_OWNER_NAME;
+}
+
 // ── Tool definitions (provider-agnostic schema) ───────────────────────────────
-const agentTools = [
-    {
-        type: 'function',
-        function: {
-            name: 'getUpcomingSchedule',
-            description: "Fetch Thanga's busy/free schedule for today and the next 7 days.",
-            parameters: { type: 'object', properties: { queryScope: { type: 'string', description: "Always 'next_7_days'" } }, required: ['queryScope'] }
-        }
-    },
-    {
-        type: 'function',
-        function: {
-            name: 'recordUserNote',
-            description:
-                "Record ONE urgent message, brief note, or meeting request from the sender for Thanga. " +
-                "Call at most ONCE per user message. Never retry or call again after success or NOTE_ALREADY_RECORDED.",
-            parameters: {
-                type: 'object',
-                properties: {
-                    senderId: { type: 'string' },
-                    senderName: { type: 'string' },
-                    noteType: { type: 'string', description: "'urgent_message', 'brief_note', or 'meeting_request'" },
-                    messageSummary: { type: 'string' },
-                    requestedDueDateTime: { type: 'string' }
-                },
-                required: ['senderId', 'senderName', 'noteType', 'messageSummary']
+function buildAgentTools(ownerName) {
+    const owner = ownerName || FALLBACK_OWNER_NAME;
+    return [
+        {
+            type: 'function',
+            function: {
+                name: 'getUpcomingSchedule',
+                description: `Fetch ${owner}'s busy/free schedule for today and the next 7 days.`,
+                parameters: { type: 'object', properties: { queryScope: { type: 'string', description: "Always 'next_7_days'" } }, required: ['queryScope'] }
+            }
+        },
+        {
+            type: 'function',
+            function: {
+                name: 'recordUserNote',
+                description:
+                    `Record ONE urgent message, brief note, or meeting request from the sender for ${owner}. ` +
+                    'Call at most ONCE per user message. Never retry or call again after success or NOTE_ALREADY_RECORDED.',
+                parameters: {
+                    type: 'object',
+                    properties: {
+                        senderId: { type: 'string' },
+                        senderName: { type: 'string' },
+                        noteType: { type: 'string', description: "'urgent_message', 'brief_note', or 'meeting_request'" },
+                        messageSummary: { type: 'string' },
+                        requestedDueDateTime: { type: 'string' }
+                    },
+                    required: ['senderId', 'senderName', 'noteType', 'messageSummary']
+                }
             }
         }
-    }
-];
+    ];
+}
 
 // ── Time / availability context ───────────────────────────────────────────────
-function getAvailabilityContext() {
+function getAvailabilityContext(ownerName) {
+    const owner = ownerName || FALLBACK_OWNER_NAME;
     const now = new Date();
     const displayTime = now.toLocaleString('en-IN', {
         timeZone: 'Asia/Kolkata',
@@ -52,8 +74,8 @@ function getAvailabilityContext() {
     const istHour = now.toLocaleString('en-US', { timeZone: 'Asia/Kolkata', hour: 'numeric', hour12: false });
     const hour = parseInt(istHour, 10);
     const defaultStatus = (hour >= 18 || hour < 9)
-        ? 'Thanga is working late / still caught up at work.'
-        : 'Thanga is currently busy at work and will respond after 06:30 PM IST.';
+        ? `${owner} is working late / still caught up at work.`
+        : `${owner} is currently busy at work and will respond after 06:30 PM IST.`;
     return { displayTime, defaultStatus };
 }
 
@@ -65,9 +87,11 @@ function getAvailabilityContext() {
  * @param {string} customContext
  * @param {string} [policyOverlay]
  * @param {string} [responseTone] global Master Agent tone
+ * @param {string} [ownerName] WhatsApp account owner display name
  */
-export function buildSystemPrompt(firstName, customContext, policyOverlay = '', responseTone = 'auto') {
-    const { displayTime, defaultStatus } = getAvailabilityContext();
+export function buildSystemPrompt(firstName, customContext, policyOverlay = '', responseTone = 'auto', ownerName = FALLBACK_OWNER_NAME) {
+    const owner = String(ownerName || '').trim() || FALLBACK_OWNER_NAME;
+    const { displayTime, defaultStatus } = getAvailabilityContext(owner);
     const userStatusText = customContext || defaultStatus;
     const toneOverlay = buildGlobalToneOverlay(responseTone);
     const tone = normalizeResponseTone(responseTone);
@@ -79,28 +103,28 @@ export function buildSystemPrompt(firstName, customContext, policyOverlay = '', 
                 ? 'Mirror the sender\'s language style (Tamil, Tanglish, or English). Keep it short, human, and use emojis when appropriate.'
                 : 'Follow GLOBAL RESPONSE TONE for style. Keep replies short and human. Mirror the sender\'s language (Tamil/Tanglish/English) unless the tone requires Tamil/Tanglish.';
 
-    return `You are Thanga's intelligent, context-aware executive assistant on WhatsApp.
+    return `You are ${owner}'s intelligent, context-aware executive assistant on WhatsApp.
 
 SENDER: The sender's name is "${firstName || 'Unknown'}".
 
 CURRENT CONTEXT & STATUS (CRITICAL):
 - Local Time: ${displayTime} IST.
-- THANGA'S CURRENT WORK/LIFE STATUS: "${userStatusText}"
-- Inform the sender about this status naturally when they ask for Thanga or request his time.
+- ${owner.toUpperCase()}'S CURRENT WORK/LIFE STATUS: "${userStatusText}"
+- Inform the sender about this status naturally when they ask for ${owner} or request their time.
 
 ROLE CLARIFICATION (CRITICAL):
-- You are an AI Assistant, NOT Thanga. If the sender addresses you directly as Thanga, state politely that you are his virtual assistant handling messages while he is occupied. NEVER pretend to be Thanga. Always refer to your boss in the third person as "Thanga".
+- You are an AI Assistant, NOT ${owner}. If the sender addresses you directly as ${owner}, state politely that you are their virtual assistant handling messages while they are occupied. NEVER pretend to be ${owner}. Always refer to your boss in the third person as "${owner}".
 
 CALENDAR & FREE SLOT SUGGESTIONS:
-- You have access to Thanga's calendar for the NEXT 7 DAYS via the 'getUpcomingSchedule' tool.
-- When people ask when Thanga is free, call 'getUpcomingSchedule', review his busy slots, and suggest 1-2 clear free time slots.
-- IMPORTANT: You CANNOT create, book, or block calendar events. You can only CHECK availability and RECORD a meeting request note for Thanga to action. Never tell someone you have "confirmed", "booked", or "blocked" a meeting — always say you have "noted the request" and that Thanga will confirm directly.
+- You have access to ${owner}'s calendar for the NEXT 7 DAYS via the 'getUpcomingSchedule' tool.
+- When people ask when ${owner} is free, call 'getUpcomingSchedule', review their busy slots, and suggest 1-2 clear free time slots.
+- IMPORTANT: You CANNOT create, book, or block calendar events. You can only CHECK availability and RECORD a meeting request note for ${owner} to action. Never tell someone you have "confirmed", "booked", or "blocked" a meeting — always say you have "noted the request" and that ${owner} will confirm directly.
 
 TOOL CALLING RULES:
-1. If the sender leaves a note/message, requests a callback, or wants to arrange a meeting, call 'recordUserNote' EXACTLY ONCE to log it for Thanga.
+1. If the sender leaves a note/message, requests a callback, or wants to arrange a meeting, call 'recordUserNote' EXACTLY ONCE to log it for ${owner}.
 2. NEVER call 'recordUserNote' more than once for the same user message. If the tool returns success or NOTE_ALREADY_RECORDED, do not call it again — just reply to the user.
-3. If the sender asks for his calendar, availability, or free slots, call 'getUpcomingSchedule' (once is enough unless they ask again later).
-4. After recording a meeting request, say: "I've noted your request for [time] and passed it to Thanga — he'll confirm with you directly." 🙏
+3. If the sender asks for ${owner}'s calendar, availability, or free slots, call 'getUpcomingSchedule' (once is enough unless they ask again later).
+4. After recording a meeting request, say: "I've noted your request for [time] and passed it to ${owner} — they'll confirm with you directly." 🙏
 5. Do not invent extra tool calls, retries, or "updates" to the same note.
 
 GREETING RULES:
@@ -148,9 +172,12 @@ export async function handleIncomingMessage(msg, botState, io) {
         return;
     }
 
+    const ownerName = resolveOwnerName(botState);
+    const agentTools = buildAgentTools(ownerName);
+
     // Media guard
     if (msg.hasMedia) {
-        await msg.reply("Hey! Thanga is tied up right now and can't view media files. Please send a text message. 😊");
+        await msg.reply(`Hey! ${ownerName} is tied up right now and can't view media files. Please send a text message. 😊`);
         return;
     }
 
@@ -162,7 +189,7 @@ export async function handleIncomingMessage(msg, botState, io) {
 
     // Load per-contact policy
     const policy = await getContactPolicy(userId);
-    const policyOverlay = buildPolicyPromptOverlay(policy);
+    const policyOverlay = buildPolicyPromptOverlay(policy, ownerName);
 
     // ── Approval-required contacts ─────────────────────────────────────────────
     if (policy?.requiresApproval) {
@@ -171,8 +198,8 @@ export async function handleIncomingMessage(msg, botState, io) {
         // Generate a draft reply first (so owner can edit it)
         let aiDraft = null;
         try {
-const draftHistory = [
-                { role: 'system', content: buildSystemPrompt(firstName, botState.customContext, policyOverlay, botState.responseTone) },
+            const draftHistory = [
+                { role: 'system', content: buildSystemPrompt(firstName, botState.customContext, policyOverlay, botState.responseTone, ownerName) },
                 { role: 'user', content: msg.body }
             ];
             const draftResp = await llmChat({ messages: draftHistory, tools: agentTools });
@@ -202,21 +229,21 @@ const draftHistory = [
         });
 
         // Send holding message to sender
-        await msg.reply("Thanks for reaching out! Your message has been received and Thanga will get back to you personally. 🙏");
+        await msg.reply(`Thanks for reaching out! Your message has been received and ${ownerName} will get back to you personally. 🙏`);
         return;
     }
 
     // ── Normal reply flow ──────────────────────────────────────────────────────
     const isNewSession = !conversationContext.has(userId);
 
-if (isNewSession) {
+    if (isNewSession) {
         conversationContext.set(userId, [
-            { role: 'system', content: buildSystemPrompt(firstName, botState.customContext, policyOverlay, botState.responseTone) }
+            { role: 'system', content: buildSystemPrompt(firstName, botState.customContext, policyOverlay, botState.responseTone, ownerName) }
         ]);
     } else {
         const history = conversationContext.get(userId);
         if (history[0]?.role === 'system') {
-            history[0].content = buildSystemPrompt(firstName, botState.customContext, policyOverlay, botState.responseTone);
+            history[0].content = buildSystemPrompt(firstName, botState.customContext, policyOverlay, botState.responseTone, ownerName);
         }
     }
 
@@ -284,7 +311,7 @@ if (isNewSession) {
                         } else {
                             scheduleFetchesThisMessage += 1;
                             if (isNewSession && scheduleFetchesThisMessage === 1) {
-                                await msg.reply(`${firstName ? 'Hi ' + firstName + '! ' : ''}Give me a moment, checking Thanga's schedule... 🗓️`);
+                                await msg.reply(`${firstName ? 'Hi ' + firstName + '! ' : ''}Give me a moment, checking ${ownerName}'s schedule... 🗓️`);
                             }
                             toolResult = await getUpcomingSchedule();
                         }
@@ -325,7 +352,7 @@ if (isNewSession) {
             response = await llmChat({ messages: history, tools: toolsForNext });
         }
 
-        const replyText = response.message.content?.trim() || "I'll pass your message to Thanga. 🙏";
+        const replyText = response.message.content?.trim() || `I'll pass your message to ${ownerName}. 🙏`;
         history.push({ role: 'assistant', content: replyText });
 
         // Send reply
@@ -356,7 +383,7 @@ if (isNewSession) {
     } catch (error) {
         console.error('Error in agent loop:', error.message || error);
         try {
-            await msg.reply("Thanga is tied up right now and will get back to you as soon as he is free. 😊");
+            await msg.reply(`${ownerName} is tied up right now and will get back to you as soon as they are free. 😊`);
         } catch { /* ignore */ }
     }
 }

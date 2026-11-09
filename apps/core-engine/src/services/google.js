@@ -33,7 +33,7 @@ export async function recordUserNote(rawArgs) {
         }
 
         const res = await tasksApi.tasks.insert({ tasklist: '@default', requestBody });
-        return `Successfully created a Google Task for Thanga from ${senderName}.`;
+        return `Successfully created a Google Task for the account owner from ${senderName}.`;
     } catch (err) {
         return "ERROR: Could not create Google Task.";
     }
@@ -59,7 +59,7 @@ export async function getUpcomingSchedule() {
         });
 
         const events = res.data.items;
-        if (!events || events.length === 0) return "Thanga has no scheduled meetings or busy slots for the next 7 days. He is completely free.";
+        if (!events || events.length === 0) return "The account owner has no scheduled meetings or busy slots for the next 7 days. They are completely free.";
 
         const scheduleByDate = {};
         events.forEach(event => {
@@ -73,7 +73,7 @@ export async function getUpcomingSchedule() {
             scheduleByDate[dateKey].push(`Busy: ${startTime} to ${endTime}`);
         });
 
-        let output = "Thanga's Busy Slots for the Next 7 Days:\n";
+        let output = "Account owner's busy slots for the next 7 days:\n";
         for (const [date, slots] of Object.entries(scheduleByDate)) {
             output += `\n📅 ${date}:\n  - ${slots.join('\n  - ')}`;
         }

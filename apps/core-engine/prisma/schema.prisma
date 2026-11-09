@@ -15,6 +15,9 @@ model Config {
   /// Global Master Agent reply tone (auto | formal | casual | friendly | concise | tamil | tanglish).
   /// Injected into the system prompt for all LLM providers. Per-contact policy tone can override.
   responseTone  String  @default("auto")
+  /// Display name of the WhatsApp account owner the assistant represents.
+  /// Defaults from linked WA pushname; editable in the control center.
+  ownerName     String  @default("")
 }
 
 model ConversationLog {

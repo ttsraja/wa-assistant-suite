@@ -30,9 +30,10 @@ export function invalidatePolicyCache(contactId) {
  * Returns additional system prompt instructions to inject for a specific contact.
  * These are appended to the base system prompt in ollamaAgent.js.
  */
-export function buildPolicyPromptOverlay(policy) {
+export function buildPolicyPromptOverlay(policy, ownerName = 'the owner') {
     if (!policy) return '';
 
+    const owner = String(ownerName || '').trim() || 'the owner';
     const lines = [];
 
     // ── Tone
@@ -52,9 +53,9 @@ if (policy.tone && policy.tone !== 'auto') {
 
     // ── Information Level
     if (policy.infoLevel === 'limited') {
-        lines.push(`\nINFORMATION POLICY: Share only general availability (busy/free). Do NOT reveal specific schedule details, project names, or internal information. Redirect deeper questions to "contact Thanga directly."`);
+        lines.push(`\nINFORMATION POLICY: Share only general availability (busy/free). Do NOT reveal specific schedule details, project names, or internal information. Redirect deeper questions to "contact ${owner} directly."`);
     } else if (policy.infoLevel === 'minimal') {
-        lines.push(`\nINFORMATION POLICY: Be extremely brief. Do NOT provide any schedule details. Simply confirm Thanga is unavailable and will respond later. Do not engage in extended conversation.`);
+        lines.push(`\nINFORMATION POLICY: Be extremely brief. Do NOT provide any schedule details. Simply confirm ${owner} is unavailable and will respond later. Do not engage in extended conversation.`);
     }
 
     // ── Restricted Topics

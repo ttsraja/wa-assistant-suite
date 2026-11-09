@@ -67,13 +67,14 @@ describe('A5 — Prisma schema durability & additive upgrades', () => {
         return paths.getPaths();
     }
 
-    it('schema.prisma declares all required models and Config.responseTone', () => {
+    it('schema.prisma declares all required models and Config.responseTone/ownerName', () => {
         const schema = readFileSync(schemaPath, 'utf8');
         for (const model of db.REQUIRED_MODELS) {
             assert.match(schema, new RegExp(`model\\s+${model}\\b`), `missing model ${model}`);
         }
         assert.match(schema, /model\s+Config\b/);
         assert.match(schema, /responseTone\s+String/);
+        assert.match(schema, /ownerName\s+String/);
         assert.match(schema, /@default\("auto"\)/);
         for (const col of db.REQUIRED_CONFIG_COLUMNS) {
             if (col === 'id') continue;

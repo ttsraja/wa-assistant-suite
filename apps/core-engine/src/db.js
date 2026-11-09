@@ -54,6 +54,7 @@ export const REQUIRED_CONFIG_COLUMNS = Object.freeze([
     'status',
     'customContext',
     'responseTone',
+    'ownerName',
 ]);
 
 /** All Prisma models that must exist after a full schema push. */
@@ -105,13 +106,13 @@ try {
         // Probe required Config columns used by the running app build.
         // Missing column (P2022) means an older desktop/browser DB needs upgrade.
         // Keep column list aligned with REQUIRED_CONFIG_COLUMNS / schema.prisma.
-        await client.$queryRaw`SELECT id, status, customContext, responseTone FROM Config LIMIT 1`;
+        await client.$queryRaw`SELECT id, status, customContext, responseTone, ownerName FROM Config LIMIT 1`;
         return { pushed: false };
     } catch (e) {
         if (!isSchemaDriftError(e)) throw e;
         const msg = String(e?.message || e);
         needsPush = true;
-        if (/responseTone|column/i.test(msg) || e?.code === 'P2022') {
+        if (/responseTone|ownerName|column/i.test(msg) || e?.code === 'P2022') {
             reason = 'additive column upgrade';
         } else if (/no such table|P2021/i.test(msg) || e?.code === 'P2021') {
             reason = 'first run';
