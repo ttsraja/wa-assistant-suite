@@ -148,7 +148,7 @@ Env: `WA_ASSISTANT_DATA_DIR`, `DATABASE_URL` (auto), `WA_ENGINE_PORT/HOST`, `WA_
 | Browser both | `npm run dev` |
 | Engine / web only | `npm run dev:engine` / `dev:web` |
 | Static UI | `npm run build:ui` |
-| Desktop | `npm run dev:desktop` or `dev:desktop:fast` |
+| Desktop | `npm run electron:repair` (if Electron broken), then `dev:desktop` / `dev:desktop:fast` |
 | Package | `npm run build:desktop:mac` / `build:desktop:win` |
 | Stop / restart | `npm run stop` / `restart` |
 | Ollama model | `ollama pull <model>` |
@@ -186,7 +186,7 @@ After **Prisma schema** changes: `npm run prisma:generate && npm run db:push`, t
 5. Never commit secrets, sessions, `*.db`, `.next`, `out/`, `release/`, `.runtime/`.
 6. Desktop data under Electron `userData` or `WA_ASSISTANT_DATA_DIR`.
 7. Do not ship writable DB inside the app bundle.
-8. Dev desktop: use stock Electron launcher only.
+8. Dev desktop: use stock Electron launcher only (`run-dev.mjs`). If `dev:desktop:fast` fails with Electron install/ENOENT, run `npm run electron:repair` (fixes path.txt newline / incomplete dist).
 
 ## Critical files
 

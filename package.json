@@ -24,11 +24,12 @@
     "test:api": "node --test tests/api/**/*.test.js",
     "test:ui": "node --test tests/ui/**/*.test.js",
     "test:smoke": "node tests/smoke/t0-engine-smoke.mjs",
-    "test:all": "npm run test:unit && npm run test:api && npm run test:ui"
+    "test:all": "npm run test:unit && npm run test:api && npm run test:ui",
+    "electron:repair": "node scripts/repair-electron.mjs"
   },
   "devDependencies": {
     "concurrently": "^8.2.2",
-    "electron": "^33.2.0",
+    "electron": "33.4.11",
     "react": "18.3.1",
     "react-dom": "18.3.1"
   },
