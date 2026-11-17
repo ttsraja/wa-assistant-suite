@@ -3,9 +3,9 @@
   "type": "module",
   "scripts": {
     "dev": "node --watch-path=src src/server.js",
-    "db:push": "prisma db push",
-    "prisma:generate": "prisma generate",
-    "postinstall": "prisma generate"
+    "db:push": "node ./scripts/run-prisma.mjs db push",
+    "prisma:generate": "node ./scripts/run-prisma.mjs generate",
+    "postinstall": "node ./scripts/run-prisma.mjs generate"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.131.0",
