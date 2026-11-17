@@ -1,6 +1,6 @@
 datasource db {
   provider = "sqlite"
-  // Overridden at runtime via DATABASE_URL (see src/paths.js). Default keeps CLI db:push working from apps/core-engine.
+  // Set by runtime (src/paths.js) and by apps/core-engine/scripts/run-prisma.mjs for CLI generate/db push.
   url      = env("DATABASE_URL")
 }
 

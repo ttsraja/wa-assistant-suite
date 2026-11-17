@@ -59,7 +59,7 @@ Prebuilt installers are published on **GitHub Releases**. Prefer the **[latest r
 > | Platform | What you may see | What to do |
 > | :--- | :--- | :--- |
 > | **macOS** | *“… is damaged and can’t be opened”* or *developer cannot be verified* | Clear quarantine (recommended) or **Open Anyway** — see [macOS install](#macos-apple-silicon) |
-> | **Windows** | SmartScreen: *“Windows protected your PC”* / unknown publisher | **More info → Run anyway** — see [Windows install](#windows-x64) |
+> | **Windows** | SmartScreen / Defender block, sometimes **without** a “More info” button | **Unblock the file** (Properties or PowerShell), then retry — see [Windows install](#windows-x64) |
 >
 > Prefer **[Run from source](#run-from-source-developers)** if your organization blocks unsigned apps entirely.
 
@@ -103,16 +103,60 @@ Prebuilt installers are published on **GitHub Releases**. Prefer the **[latest r
 
 **Install**
 
-1. Run the Setup EXE (or launch the portable build).
-2. **First launch (unsigned build — important):** Windows SmartScreen may show *“Windows protected your PC”* or warn about an **unknown publisher**. That is normal until the installer is **Authenticode-signed**.
+1. Download the Setup EXE (or portable build) from [Releases](https://github.com/ttsraja/wa-assistant-suite/releases/latest).
+2. **First run (unsigned build — important):** Windows may block the file because it is not Authenticode-signed yet. That is a trust warning, not proof the download is corrupt.
 
-   - Click **More info**
-   - Click **Run anyway**
+#### If you see *“Windows protected your PC”* **with** More info
 
-   > Same roadmap as macOS: once a Windows code-signing certificate is configured, SmartScreen warnings should stop (or become rare as reputation builds).
+1. Click **More info**
+2. Click **Run anyway**
 
-3. If Windows Defender or another AV quarantines the file, restore it from the protection history (false positive risk is higher for new unsigned Electron apps) or use **[Run from source](#run-from-source-developers)**.
-4. Scan the WhatsApp QR and configure your LLM as on macOS.
+#### If there is **no More info** button (common on newer Windows / Smart App Control)
+
+The download is usually marked with a **Mark of the Web** quarantine flag. Clear it once, then run again:
+
+**Option A — File Properties (no admin needed)**
+
+1. In File Explorer, go to your **Downloads** folder (or wherever the `.exe` is).
+2. **Right-click** the installer → **Properties**.
+3. On the **General** tab, look at the bottom for:
+   > *Security: This file came from another computer and might be blocked…*
+4. Check **Unblock** → **Apply** → **OK**.
+5. Double-click the `.exe` again.
+
+**Option B — PowerShell (reliable when Properties has no Unblock box)**
+
+Open **PowerShell** and run (adjust the path/filename if needed):
+
+```powershell
+# Unblock Setup installer
+Unblock-File -Path "$env:USERPROFILE\Downloads\WA.Assistant.Suite.Setup.1.0.0.exe"
+
+# Or unblock every WA Assistant download in Downloads:
+Get-ChildItem "$env:USERPROFILE\Downloads\WA.Assistant.Suite*.exe" | Unblock-File
+
+# Then start it:
+Start-Process "$env:USERPROFILE\Downloads\WA.Assistant.Suite.Setup.1.0.0.exe"
+```
+
+**Option C — Portable build**
+
+1. Download `WA.Assistant.Suite.1.0.0.exe` (portable).
+2. Unblock it the same way (Properties or `Unblock-File`).
+3. Run it — no installer wizard.
+
+**Option D — Defender / Smart App Control still blocks**
+
+1. Open **Windows Security** → **Protection history** (or **Virus & threat protection** → Protection history).
+2. If the file was **quarantined** or **blocked**, open the event → **Actions** → **Restore** / **Allow**.
+3. **Windows Security** → **App & browser control** → **Reputation-based protection** settings:
+   - Check **Check apps and files** / SmartScreen — if set to **Block**, try **Warn** temporarily, run the app once, then restore your preferred setting.
+4. If **Smart App Control** is **On** in evaluation/enforcement mode and your org PC forbids unsigned apps, use **[Run from source](#run-from-source-developers)** instead.
+
+> Roadmap: once a Windows code-signing certificate is configured, SmartScreen blocks should stop (or become rare as publisher reputation builds).
+
+3. After install, link WhatsApp (QR) and configure your LLM as on macOS.
+4. If your company policy still blocks unsigned EXEs entirely, skip the installer and use **[Run from source](#run-from-source-developers)**.
 
 **Data location (Windows):**  
 `%APPDATA%\WA Assistant Suite\`
@@ -142,7 +186,7 @@ Or open the [latest release](https://github.com/ttsraja/wa-assistant-suite/relea
 | :--- | :--- |
 | **Unsigned builds (temporary)** | macOS is not Apple-signed/notarized yet; Windows is not Authenticode-signed yet. See the [caution](#download-desktop-app) and install steps. **Planned fix:** Apple Developer account → Developer ID + notarization; Windows code-signing cert → signed Setup/Portable. |
 | **“Damaged” on macOS** | Almost always quarantine/Gatekeeper — run `xattr -cr "/Applications/WA Assistant Suite.app"`, not a re-download. |
-| **SmartScreen on Windows** | **More info → Run anyway** until signed releases ship. |
+| **SmartScreen on Windows** | Prefer **Unblock** (Properties or `Unblock-File`) when there is no **More info** button; otherwise **More info → Run anyway**. See [Windows install](#windows-x64). |
 | **Exact filenames** | GitHub Release assets use dotted names (e.g. `WA.Assistant.Suite-1.0.0-arm64.dmg`). Source code archives (`Source code (zip)` / `tar.gz`) are also on the release page. If a link 404s, open the [Releases page](https://github.com/ttsraja/wa-assistant-suite/releases/latest). |
 | **Packaging status** | Production installers still need a complete engine dependency stage for fully offline packaged runs. If a release build fails to start the engine, use **[Run from source](#run-from-source-developers)** or `npm run dev:desktop:fast`. |
 | **Publishing** | Maintainers: `npm run build:desktop:mac` / `build:desktop:win`, upload from `apps/desktop/release/` to a GitHub Release (e.g. `v1.0.0`). |
@@ -169,11 +213,37 @@ npm run prisma:generate
 npm run db:push
 ```
 
-Optional env template:
+**Windows (PowerShell / cmd) — same commands from the repo root:**
+
+```powershell
+git clone https://github.com/ttsraja/wa-assistant-suite.git
+cd wa-assistant-suite
+npm install
+npm run prisma:generate
+npm run db:push
+```
+
+`db:push` / `prisma:generate` **set `DATABASE_URL` automatically** (via `apps/core-engine/scripts/run-prisma.mjs`). You do **not** need a `.env` file just to run Prisma.
+
+If you previously saw Prisma **P1012** (`Environment variable not found: DATABASE_URL`), pull the latest code and re-run the commands above — do not hand-edit `schema.prisma` to remove `env("DATABASE_URL")`.
+
+Optional env template (API keys / path overrides only):
 
 ```bash
-cp .env.example apps/core-engine/.env   # edit as needed — never commit secrets
+# macOS / Linux
+cp .env.example apps/core-engine/.env
+
+# Windows PowerShell
+Copy-Item .env.example apps\core-engine\.env
 ```
+
+If you set `DATABASE_URL` yourself, use the package DB path relative to `apps/core-engine`:
+
+```env
+DATABASE_URL="file:./prisma/data.db"
+```
+
+(Not `file:./data.db` — that points at the wrong file for browser-dev.)
 
 ### Option A — Browser control center
 

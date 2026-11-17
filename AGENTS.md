@@ -144,7 +144,7 @@ Env: `WA_ASSISTANT_DATA_DIR`, `DATABASE_URL` (auto), `WA_ENGINE_PORT/HOST`, `WA_
 | Task | Command |
 | :--- | :--- |
 | Install | `npm install` |
-| Prisma | `npm run prisma:generate` / `npm run db:push` |
+| Prisma | `npm run prisma:generate` / `npm run db:push` (sets `DATABASE_URL` via `apps/core-engine/scripts/run-prisma.mjs`) |
 | Browser both | `npm run dev` |
 | Engine / web only | `npm run dev:engine` / `dev:web` |
 | Static UI | `npm run build:ui` |
